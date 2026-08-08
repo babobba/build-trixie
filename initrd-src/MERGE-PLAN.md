@@ -52,7 +52,7 @@ runtime.
 | `volume=` | both | `amixer set Master N%` via `/etc/rc.local` |
 | `login=` | both | Autologin user in `/etc/inittab` |
 | `cliexec=` | both | Commands into `/etc/rc.local`, before X starts |
-| `guiexec=` | both | Commands into the Openbox `autostart` files |
+| `guiexec=` | both | XDG autostart entry + Openbox autostart, run once |
 | `zram=` | both | zram swap set up from `/etc/rc.local` |
 | `sgnfile=` | Porteus | Alias for `cfgfile=`; `cfgfile=` wins if both given |
 | `nologin` | PorteuX | Disable autologin, plain getty on tty1 |

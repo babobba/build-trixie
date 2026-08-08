@@ -767,18 +767,46 @@ if [ -s $CHEATRC ]; then
 	chmod +x $RCL
 fi
 
-# guiexec= : run once the desktop is up, via the Openbox autostart files
+# guiexec= : run once the desktop is up.  The commands go into one script that
+# is started two ways, because neither way covers every build on its own:
+#
+#   - an XDG autostart entry, which Xfce, Mate and LXQt honour directly;
+#   - a line in each Openbox autostart file, because openbox-xdg-autostart
+#     needs PyXDG and python3-xdg is not installed in a default image, so the
+#     XDG entry alone would never fire on the default Openbox desktop.
+#
+# The script takes a boot-scoped lock with mkdir, which is atomic, so on a
+# desktop that honours both it still runs exactly once.
 GUIEXEC=`value guiexec`
 if [ "$GUIEXEC" ]; then
 	echo $i"guiexec: $GUIEXEC"
+	mkdir -p /union/etc/xdg/autostart /union/usr/local/bin 2>/dev/null
+	GX=/union/usr/local/bin/guiexec-cheat
+	cat > $GX <<'GXHEAD'
+#!/bin/sh
+# generated from the guiexec= cheatcode - do not edit, it is rewritten at boot
+BOOTID=`cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo nolock`
+mkdir /tmp/.guiexec-cheat-$BOOTID 2>/dev/null || exit 0
+GXHEAD
+	echo "$GUIEXEC" | tr ';' '\n' | while read -r cmd; do
+		[ "$cmd" ] && echo "`echo \"$cmd\" | tr '~' ' '` &" >> $GX
+	done
+	echo "exit 0" >> $GX
+	chmod +x $GX
+	cat > /union/etc/xdg/autostart/guiexec-cheat.desktop <<GXEOF
+[Desktop Entry]
+Type=Application
+Name=guiexec cheatcode
+Exec=/usr/local/bin/guiexec-cheat
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+GXEOF
 	for ashome in /union/root /union/home/*; do
 		[ -d "$ashome/.config/openbox" ] || continue
 		AS="$ashome/.config/openbox/autostart"
 		echo "" >> "$AS"
-		echo "# added by initrd cheatcodes" >> "$AS"
-		echo "$GUIEXEC" | tr ';' '\n' | while read -r cmd; do
-			[ "$cmd" ] && echo "`echo \"$cmd\" | tr '~' ' '` &" >> "$AS"
-		done
+		echo "# added by the guiexec= cheatcode" >> "$AS"
+		echo "/usr/local/bin/guiexec-cheat &" >> "$AS"
 	done
 fi
 ################################################################################
