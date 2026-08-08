@@ -64,6 +64,10 @@ runtime.
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
 stands in for a space.
 
+`guiexec=` runs its commands once per boot. The lock that prevents the XDG
+entry and the Openbox entry from both firing is keyed to the boot id, so
+restarting X within a session will not start them a second time.
+
 One deliberate difference from Porteus: the default marker file used to locate
 the boot medium is the initrd itself, `initrd1.xz`, not a `.sgn` file. A
 Porteus boot line that relies on the default therefore has to name its marker

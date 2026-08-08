@@ -33,8 +33,12 @@ echo "-- running it twice only starts the commands once"
 assert_grep "the script takes a lock"      "$SCRIPT" 'mkdir /tmp/.guiexec-cheat-'
 assert_grep "the lock is boot-scoped"      "$SCRIPT" 'boot_id'
 assert_grep "a second run exits early"     "$SCRIPT" '|| exit 0'
-# Prove it: run the generated script twice with the commands stubbed.
+# Prove it: run the generated script twice with the commands stubbed.  The
+# lock is keyed to the boot id, so clear any left by an earlier suite run --
+# which also shows the lock holds across separate processes, not just within
+# one shell.
 sed -e 's#^xterm -T hi &#echo RAN >> '"$WORK"'/ran#' -e 's#^leafpad &##' "$SCRIPT" > "$WORK/gx.sh"
+rm -rf /tmp/.guiexec-cheat-*
 rm -f "$WORK/ran"; sh "$WORK/gx.sh"; sh "$WORK/gx.sh"
 assert_equal "commands ran exactly once" "1" "$(grep -c RAN "$WORK/ran" 2>/dev/null || echo 0)"
 
