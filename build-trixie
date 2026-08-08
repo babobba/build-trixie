@@ -20,6 +20,9 @@
 # 2025-11-29, structure changes in repo, e.g. tar.gz archives are extracted
 # and added support for "extra-commands" script, will run /tmp/chroot/extra-commands
 # 2025-12-15, Changes for 32-bit build (i.e. install bookworm 686 kernel)
+# 2026-08-08, initrd boot scripts (linuxrc, finit) are now kept as text in
+# ... 'initrd-src' and overlaid on the extracted skeleton, so changes to them are
+# ... reviewable; see initrd-src/MERGE-PLAN.md
 
 # below uncommented will enable the snapshot repository, comment out to disable
 export SNAPSHOT="deb http://snapshot.debian.org/archive/debian/20240823 trixie main"
@@ -391,6 +394,14 @@ ok_or_failed
 echo -e "\e[0;36mExtract initrd skeleton, required for porteus-boot, to chroot/tmp ...\033[0m"
 tar -zxf ../initrdport-bullseye.tar.gz -C chroot/tmp
 #cp -af initrdport-bullseye chroot/tmp/  # copy initrd skeleton to chroot/tmp/
+ok_or_failed
+
+# The boot scripts are kept as text in ../initrd-src so that changes to them
+# are reviewable, instead of being buried in the binary skeleton archive.
+# Everything else in the initrd (busybox, libs) still comes from the tarball.
+echo -e "\e[0;36mOverlay initrd boot scripts from initrd-src...\033[0m"
+cp -af ../initrd-src/linuxrc ../initrd-src/finit chroot/tmp/initrdport-bullseye/
+chmod +x chroot/tmp/initrdport-bullseye/linuxrc
 ok_or_failed
 
 echo -e "\e[0;36mCopy .deb packages from ../debs (if existing) to chroot/tmp/...\033[0m"
