@@ -280,14 +280,28 @@ rootcopy_apply() {
 	[ -d "$SRC" ] || return 0
 	if param rootmount; then
 		echo $i"mounting content of $2 directory (rootmount)"
-		find "$SRC" -type f 2>/dev/null | while read -r f; do
+		# Directories and symlinks cost nothing in the overlay, so they are
+		# recreated; only regular files are bind-mounted, which is where the
+		# memory saving is.  Anything else (device nodes, fifos) is copied,
+		# since it cannot be usefully bind-mounted either.
+		find "$SRC" -mindepth 1 2>/dev/null | while read -r f; do
 			rel=${f#$SRC}
 			case "$rel" in /*) ;; *) rel="/$rel" ;; esac
-			if [ ! -f "/union$rel" ]; then
+			if [ -L "$f" ]; then
 				mkdir -p "`dirname \"/union$rel\"`" 2>/dev/null
-				: > "/union$rel" 2>/dev/null || continue
+				cp -af "$f" "/union$rel" 2>/dev/null
+			elif [ -d "$f" ]; then
+				mkdir -p "/union$rel" 2>/dev/null
+			elif [ -f "$f" ]; then
+				if [ ! -f "/union$rel" ]; then
+					mkdir -p "`dirname \"/union$rel\"`" 2>/dev/null
+					: > "/union$rel" 2>/dev/null || continue
+				fi
+				mount -o bind "$f" "/union$rel" 2>/dev/null
+			else
+				mkdir -p "`dirname \"/union$rel\"`" 2>/dev/null
+				cp -af "$f" "/union$rel" 2>/dev/null
 			fi
-			mount -o bind "$f" "/union$rel" 2>/dev/null
 		done
 	else
 		echo $i"copying content of $2 directory"

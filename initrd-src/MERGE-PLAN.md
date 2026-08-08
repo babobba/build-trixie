@@ -58,7 +58,7 @@ runtime.
 | `nologin` | PorteuX | Disable autologin, plain getty on tty1 |
 | `nobluetooth` | PorteuX | Disable `/etc/init.d/bluetooth` |
 | `noupdateclock` | PorteuX | Disable `/etc/init.d/hwclock.sh` |
-| `rootmount` | PorteuX | Bind-mount rootcopy files instead of copying |
+| `rootmount` | PorteuX | Bind-mount rootcopy files; recreate dirs/symlinks |
 | `fscknolog` | PorteuX | Run `fsck` quietly, log kept in the boot log |
 
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`

@@ -11,6 +11,7 @@ setup_src() {
 	echo "hello" > "$WORK/src/etc/hosts"
 	echo "#!/bin/sh" > "$WORK/src/usr/local/bin/tool"
 	ln -sf /etc/hosts "$WORK/src/etc/hosts-link"
+	mkfifo "$WORK/src/etc/afifo" 2>/dev/null
 }
 
 run_rootcopy() {   # $1 = cmdline
@@ -40,12 +41,17 @@ assert_grep "nested file is bind-mounted"     "$WORK/mounts" 'usr/local/bin/tool
 assert_file "a mount point is created for it" "$WORK/union/usr/local/bin/tool"
 assert_not_grep "the overlay copy stays empty" "$WORK/union/etc/hosts" 'hello'
 
-echo "-- rootmount: non-regular entries (known gap, task 3)"
-# rootcopy_apply uses `find -type f`, so symlinks and empty directories in the
-# rootcopy tree are skipped under rootmount.  These flip to real assertions
-# once that is fixed.
-xfail "symlink is recreated"        test -L "$WORK/union/etc/hosts-link"
-xfail "empty directory is recreated" test -d "$WORK/union/empty"
+echo "-- rootmount: non-regular entries are handled, not skipped"
+# Directories and symlinks cost nothing in the overlay so they are recreated;
+# only regular files are bind-mounted, which is where the saving is.
+assert_symlink "symlink is recreated"        "$WORK/union/etc/hosts-link" '/etc/hosts'
+assert_not_grep "the symlink is not bind-mounted" "$WORK/mounts" 'hosts-link'
+[ -d "$WORK/union/empty" ] && _pass "empty directory is recreated" \
+	|| _fail "empty directory is recreated" "missing union/empty"
+assert_not_grep "directories are not bind-mounted" "$WORK/mounts" 'MOUNT -o bind .*/empty '
+[ -p "$WORK/union/etc/afifo" ] && _pass "a fifo is copied, not bind-mounted" \
+	|| _fail "a fifo is copied, not bind-mounted" "missing union/etc/afifo"
+assert_grep "parent dirs exist for mounted files" "$WORK/mounts" 'usr/local/bin/tool' 
 
 echo "-- a missing rootcopy directory is not an error"
 make_fakeroot; rm -rf "$WORK/src"; mkdir -p "$WORK/src"; run_rootcopy "quiet"
