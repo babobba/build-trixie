@@ -89,3 +89,15 @@ stands in for a space.
 and the ISO must boot to the desktop with no cheatcodes given, proving the
 defaults path is untouched. Each new code is then checked by booting with it
 set and inspecting the file it is supposed to have written.
+
+## Running the tests
+
+`initrd-src/test-cheats.sh` extracts the cheatcode block from `linuxrc`, runs
+it against a fake DebianDog root under `/tmp/cheattest`, and asserts that each
+cheatcode writes what it claims to. It needs no root and no build:
+
+    ./initrd-src/test-cheats.sh
+
+The last case boots with no cheatcodes at all and asserts that `rc.local`,
+`inittab`, `/etc/default/keyboard` and the Openbox autostart files come out
+byte-identical, so a regression in the default path fails the suite.
