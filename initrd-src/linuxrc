@@ -44,6 +44,10 @@ CFG=`value cfgfile`; [ $CFG ] || CFG=`value sgnfile`; [ $CFG ] || CFG=initrd1.xz
 FROM=`value from`; ISO=`echo $FROM | egrep ".*\.iso( |\$)"`
 IP=`value ip | cut -d: -f2`
 NFSPATH=`value nfspath`; [ $NFSPATH ] || NFSPATH=/srv/pxe
+# storage= (Porteus): where a netbooted client keeps its changes, exported by
+# the same NFS server.  Derived from nfspath= so that changing the export root
+# moves the storage with it; the default is the historical /srv/pxe/storage.
+STORAGE=`value storage`; [ $STORAGE ] || STORAGE=$NFSPATH/storage
 MOPT=`value mopt`; [ $MOPT ] || MOPT="noatime,nodiratime,suid,dev,exec,async"
 CHANGES=`value changes`
 PFULL=`value pfull`
@@ -116,12 +120,16 @@ if [ $IP ]; then BOOTDEV=network; CFGDEV=/mnt/nfs
     ls /sys/class/net | grep -q eth || { for x in `find /lib/modules/$(uname -r)/kernel/drivers/net -name "*.ko" | sed 's/.ko//g'`; do modprobe `basename $x` 2>/dev/null; ls /sys/class/net | grep -q eth && break || modprobe -r `basename $x` 2>/dev/null; done; }
     mkdir -p /mnt/nfs/storage; udhcpc; modprobe nfsv4; mount -t nfs4 $IP:$NFSPATH /mnt/nfs -o ro,nolock 2>/dev/null || { modprobe nfsv3; mount -t nfs $IP:$NFSPATH /mnt/nfs -o ro,nolock 2>/dev/null; }
     MAC=`ifconfig | grep eth0 | cut -d: -f5-7 | sed s/://g | cut -d" " -f1`
-    if [ "$CHANGES" = /srv/pxe/storage ]; then
+    # Netbooted changes go to the NFS-exported storage directory when the user
+    # asks for it with storage=, or with the older changes=<storage path>.
+    if [ "`value storage`" ] || [ "$CHANGES" = "$STORAGE" ]; then
+	echo $i"using NFS storage $STORAGE for changes"
 	if lsmod | grep -q nfsv3; then
-	    mount -t nfs $IP:/srv/pxe/storage /mnt/nfs/storage -o rw,nolock 2>/dev/null && { mkdir -p /mnt/nfs/storage/client-$MAC/changes/home; CHANGES="/storage/client-$MAC"; }
+	    mount -t nfs $IP:$STORAGE /mnt/nfs/storage -o rw,nolock 2>/dev/null && { mkdir -p /mnt/nfs/storage/client-$MAC/changes/home; CHANGES="/storage/client-$MAC"; }
 	else
-	    mount -t nfs4 $IP:/srv/pxe/storage /mnt/nfs/storage -o rw,nolock 2>/dev/null && { mkdir -p /mnt/nfs/storage/client-$MAC/changes/home; CHANGES="/storage/client-$MAC"; }
+	    mount -t nfs4 $IP:$STORAGE /mnt/nfs/storage -o rw,nolock 2>/dev/null && { mkdir -p /mnt/nfs/storage/client-$MAC/changes/home; CHANGES="/storage/client-$MAC"; }
 	fi
+	[ "$CHANGES" = "/storage/client-$MAC" ] || echo $i"could not mount $STORAGE - changes will stay in memory"
     fi
     if [ $FROM ]; then
         FOLDER=$FROM/live

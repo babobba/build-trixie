@@ -59,6 +59,7 @@ runtime.
 | `nobluetooth` | PorteuX | Disable `/etc/init.d/bluetooth` |
 | `noupdateclock` | PorteuX | Disable `/etc/init.d/hwclock.sh` |
 | `rootmount` | PorteuX | Bind-mount rootcopy files; recreate dirs/symlinks |
+| `storage=` | Porteus | Where a netbooted client's changes are kept |
 | `fscknolog` | PorteuX | Run `fsck` quietly, log kept in the boot log |
 
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
@@ -87,10 +88,12 @@ silently ignored, so a typo fails loudly instead of booting the wrong medium.
 
 ## Deliberately not ported
 
-- `pxe` and `storage=` — fred already boots over NFS via `ip=` and `nfspath=`.
-  Making the hardcoded `/srv/pxe` paths configurable is worthwhile but is a
-  change to the NFS boot path, which deserves its own commit and a PXE server
-  to test against.
+- `pxe` — on Porteus this turns the booted machine into a PXE *server*, by
+  starting tftpd, dhcpcd and an NFS server. None of those daemons is in a
+  DebianDog image, so there is nothing for the cheatcode to start. It would
+  need `tftpd-hpa`, a DHCP server and `nfs-kernel-server` added to the config
+  first, at which point it is a feature in its own right rather than a
+  cheatcode port.
 - `nomagic` — no DebianDog equivalent, see above.
 
 ## Testing
