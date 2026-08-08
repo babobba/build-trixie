@@ -798,17 +798,43 @@ if [ "$CLIEXEC" ]; then
 	done
 fi
 
-# Write everything collected above into /etc/rc.local, before its final exit 0
+# Everything collected above goes into one script, run before the graphical
+# session starts.  It is called from two places because neither is sufficient:
+#
+#   - /etc/rc.local, which is where this kind of thing belongs, but runs as
+#     S03 in the multiuser runlevel while inittab starts the tty1 autologin at
+#     the same time, so startx can win the race;
+#   - /etc/profile, immediately before its startx call, which is ordered by
+#     construction but only covers the tty1 login path.
+#
+# The script takes a boot-scoped lock with mkdir, which is atomic, so whichever
+# gets there first runs the commands and the other returns immediately.  That
+# is what makes this the runlevel-3 equivalent Porteus documents: the commands
+# have always run by the time X starts.
 if [ -s $CHEATRC ]; then
+	mkdir -p /union/usr/local/bin 2>/dev/null
+	CX=/union/usr/local/bin/cliexec-cheat
+	cat > $CX <<'CXHEAD'
+#!/bin/sh
+# generated from the cliexec=/volume=/zram= cheatcodes - rewritten at boot
+BOOTID=`cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo nolock`
+mkdir /tmp/.cliexec-cheat-$BOOTID 2>/dev/null || exit 0
+CXHEAD
+	cat $CHEATRC >> $CX
+	echo "exit 0" >> $CX
+	chmod +x $CX
+
 	RCL=/union/etc/rc.local
 	[ -f $RCL ] || printf '#!/bin/sh -e\n\nexit 0\n' > $RCL
 	grep -v '^exit 0' $RCL > /tmp/rc.local.new
 	echo "" >> /tmp/rc.local.new
 	echo "# added by initrd cheatcodes" >> /tmp/rc.local.new
-	cat $CHEATRC >> /tmp/rc.local.new
+	echo "/usr/local/bin/cliexec-cheat || true" >> /tmp/rc.local.new
 	echo "exit 0" >> /tmp/rc.local.new
 	cat /tmp/rc.local.new > $RCL
 	chmod +x $RCL
+
+	sed -i 's|^startx$|/usr/local/bin/cliexec-cheat; startx|' /union/etc/profile 2>/dev/null
 fi
 
 # guiexec= : run once the desktop is up.  The commands go into one script that

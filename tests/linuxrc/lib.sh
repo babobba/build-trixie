@@ -70,6 +70,9 @@ make_fakeroot() {
 	: > "$WORK/union/root/.config/openbox/autostart"
 	: > "$WORK/union/home/puppy/.config/openbox/autostart"
 	ln -sf /usr/share/zoneinfo/Etc/UTC "$WORK/union/etc/localtime"
+	# /etc/profile starts X on tty1, exactly as the built image does
+	printf 'export PATH\n\nif [ -z "${DISPLAY}" ] && [ $(tty) = /dev/tty1 ]\nthen\nsleep 3\nstartx\nfi\n' \
+		> "$WORK/union/etc/profile"
 }
 
 # ------------------------------------------------------------------- running
