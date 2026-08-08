@@ -712,15 +712,59 @@ if param noupdateclock; then
 	chmod -x /union/etc/init.d/hwclock.sh 2>/dev/null
 fi
 
-# login=user / nologin : autologin is done from /etc/inittab on tty1
+# login=user / nologin : autologin.
+# Without a display manager this is the tty1 line in /etc/inittab.  With one,
+# build-trixie has already swapped in inittab-noauto and login goes through the
+# display manager, so touching inittab alone would do nothing visible - the
+# display manager has to be configured as well.  Drop-in files are used where
+# the display manager supports them, so its packaged config is left alone.
+DMNAME=`cat /union/etc/X11/default-display-manager 2>/dev/null`; DMNAME=${DMNAME##*/}
 LOGINUSER=`value login`
 if [ "$LOGINUSER" ]; then
 	echo $i"autologin as $LOGINUSER"
 	sed -i 's|/bin/login -f [A-Za-z0-9_.-]*|/bin/login -f '"$LOGINUSER"'|' /union/etc/inittab
+	case "$DMNAME" in
+	  slim)
+		sed -i -e 's|^#*[ \t]*default_user.*|default_user        '"$LOGINUSER"'|' \
+		       -e 's|^#*[ \t]*auto_login.*|auto_login          yes|' /union/etc/slim.conf 2>/dev/null
+		grep -q '^default_user' /union/etc/slim.conf 2>/dev/null || \
+			echo "default_user        $LOGINUSER" >> /union/etc/slim.conf
+		grep -q '^auto_login' /union/etc/slim.conf 2>/dev/null || \
+			echo "auto_login          yes" >> /union/etc/slim.conf ;;
+	  lightdm)
+		mkdir -p /union/etc/lightdm/lightdm.conf.d 2>/dev/null
+		printf '[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\n' "$LOGINUSER" \
+			> /union/etc/lightdm/lightdm.conf.d/90-autologin.conf ;;
+	  sddm)
+		mkdir -p /union/etc/sddm.conf.d 2>/dev/null
+		printf '[Autologin]\nUser=%s\n' "$LOGINUSER" \
+			> /union/etc/sddm.conf.d/90-autologin.conf ;;
+	  gdm3|gdm)
+		mkdir -p /union/etc/gdm3 2>/dev/null
+		printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=%s\n' "$LOGINUSER" \
+			> /union/etc/gdm3/daemon.conf ;;
+	  "") ;;
+	  *) echo $i"login= : display manager $DMNAME is not known here - only /etc/inittab was changed" ;;
+	esac
 fi
 if param nologin; then
 	echo $i"disabling autologin"
 	sed -i 's|^\(1:[0-9]*:respawn:\)/bin/login -f .*|\1/sbin/getty 38400 tty1|' /union/etc/inittab
+	case "$DMNAME" in
+	  slim)
+		sed -i 's|^#*[ \t]*auto_login.*|auto_login          no|' /union/etc/slim.conf 2>/dev/null ;;
+	  lightdm)
+		mkdir -p /union/etc/lightdm/lightdm.conf.d 2>/dev/null
+		printf '[Seat:*]\nautologin-user=\n' > /union/etc/lightdm/lightdm.conf.d/90-autologin.conf ;;
+	  sddm)
+		mkdir -p /union/etc/sddm.conf.d 2>/dev/null
+		printf '[Autologin]\nUser=\nSession=\n' > /union/etc/sddm.conf.d/90-autologin.conf ;;
+	  gdm3|gdm)
+		mkdir -p /union/etc/gdm3 2>/dev/null
+		printf '[daemon]\nAutomaticLoginEnable=false\n' > /union/etc/gdm3/daemon.conf ;;
+	  "") ;;
+	  *) echo $i"nologin : display manager $DMNAME is not known here - only /etc/inittab was changed" ;;
+	esac
 fi
 
 # volume= : master volume as a percentage

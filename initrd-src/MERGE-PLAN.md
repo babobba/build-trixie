@@ -50,12 +50,12 @@ runtime.
 | `timezone=` | both | `/etc/timezone` + relink `/etc/localtime` |
 | `utc` | both | Write `/etc/adjtime` with `UTC` |
 | `volume=` | both | `amixer set Master N%` via `/etc/rc.local` |
-| `login=` | both | Autologin user in `/etc/inittab` |
+| `login=` | both | Autologin user in `/etc/inittab`, or the display manager |
 | `cliexec=` | both | Commands into `/etc/rc.local`, before X starts |
 | `guiexec=` | both | XDG autostart entry + Openbox autostart, run once |
 | `zram=` | both | zram swap set up from `/etc/rc.local` |
 | `sgnfile=` | Porteus | Alias for `cfgfile=`; `cfgfile=` wins if both given |
-| `nologin` | PorteuX | Disable autologin, plain getty on tty1 |
+| `nologin` | PorteuX | Disable autologin in `/etc/inittab` and the display manager |
 | `nobluetooth` | PorteuX | Disable `/etc/init.d/bluetooth` |
 | `noupdateclock` | PorteuX | Disable `/etc/init.d/hwclock.sh` |
 | `rootmount` | PorteuX | Bind-mount rootcopy files; recreate dirs/symlinks |
