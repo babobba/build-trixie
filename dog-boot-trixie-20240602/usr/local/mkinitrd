@@ -115,6 +115,20 @@ copy_including_deps /$LMK/kernel/drivers/md/dm-crypt.*
 
 copy_including_deps /$LMK/kernel/drivers/pci/controller/vmd.*
 
+# virtual machine storage and network drivers.  Without these the live system
+# cannot boot under QEMU/KVM, libvirt or Proxmox, which all default to virtio
+# storage, nor on Hyper-V, VMware or Xen.  virtio core and virtio_pci are
+# built into the Debian kernel, so only the device drivers are needed here.
+copy_including_deps /$LMK/kernel/drivers/virtio
+copy_including_deps /$LMK/kernel/drivers/block/virtio_blk.*
+copy_including_deps /$LMK/kernel/drivers/scsi/virtio_scsi.*
+copy_including_deps /$LMK/kernel/drivers/net/virtio_net.*
+copy_including_deps /$LMK/kernel/drivers/hv
+copy_including_deps /$LMK/kernel/drivers/scsi/hv_storvsc.*
+copy_including_deps /$LMK/kernel/drivers/scsi/vmw_pvscsi.*
+copy_including_deps /$LMK/kernel/drivers/net/vmxnet3
+copy_including_deps /$LMK/kernel/drivers/block/xen-blkfront.*
+
 #copy_including_deps /$LMK/kernel/drivers/ata/pata_*.*
 copy_including_deps /$LMK/kernel/drivers/ata/pata_amd.*
 copy_including_deps /$LMK/kernel/drivers/ata/pata_atiixp.*

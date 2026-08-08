@@ -400,7 +400,7 @@ ok_or_failed
 # are reviewable, instead of being buried in the binary skeleton archive.
 # Everything else in the initrd (busybox, libs) still comes from the tarball.
 echo -e "\e[0;36mOverlay initrd boot scripts from initrd-src...\033[0m"
-cp -af ../initrd-src/linuxrc ../initrd-src/finit chroot/tmp/initrdport-bullseye/
+cp -af ../initrd-src/linuxrc ../initrd-src/finit ../initrd-src/modlist chroot/tmp/initrdport-bullseye/
 chmod +x chroot/tmp/initrdport-bullseye/linuxrc
 ok_or_failed
 
