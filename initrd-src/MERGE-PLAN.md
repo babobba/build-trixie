@@ -54,7 +54,7 @@ runtime.
 | `cliexec=` | both | Commands into `/etc/rc.local`, before X starts |
 | `guiexec=` | both | Commands into the Openbox `autostart` files |
 | `zram=` | both | zram swap set up from `/etc/rc.local` |
-| `sgnfile=` | Porteus | Alias for fred's existing `cfgfile=` |
+| `sgnfile=` | Porteus | Alias for `cfgfile=`; `cfgfile=` wins if both given |
 | `nologin` | PorteuX | Disable autologin, plain getty on tty1 |
 | `nobluetooth` | PorteuX | Disable `/etc/init.d/bluetooth` |
 | `noupdateclock` | PorteuX | Disable `/etc/init.d/hwclock.sh` |
@@ -63,6 +63,12 @@ runtime.
 
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
 stands in for a space.
+
+One deliberate difference from Porteus: the default marker file used to locate
+the boot medium is the initrd itself, `initrd1.xz`, not a `.sgn` file. A
+Porteus boot line that relies on the default therefore has to name its marker
+explicitly with `sgnfile=`. A marker that cannot be found is fatal rather than
+silently ignored, so a typo fails loudly instead of booting the wrong medium.
 
 ## Bugs fixed alongside
 

@@ -34,6 +34,12 @@ echo -e "${BOLD}Starting init script.${RST}"
 i=`echo "[1;33m""^ ""[0m"`
 m=`echo "[1;33m""->""[0m"`
 arch=`uname -m`; [ $arch = x86_64 ] || arch=i586
+# Marker file used to locate the boot medium, searched for as live/$CFG.
+# cfgfile= is the PorteuX spelling and wins if both are given; sgnfile= is the
+# Porteus spelling for the same thing.  The default marker here is the initrd
+# itself, not a .sgn file as on Porteus, so a Porteus boot line that relies on
+# the default must name its marker explicitly.  A marker that cannot be found
+# is fatal rather than silently ignored - see the 'fatal' script.
 CFG=`value cfgfile`; [ $CFG ] || CFG=`value sgnfile`; [ $CFG ] || CFG=initrd1.xz
 FROM=`value from`; ISO=`echo $FROM | egrep ".*\.iso( |\$)"`
 IP=`value ip | cut -d: -f2`
