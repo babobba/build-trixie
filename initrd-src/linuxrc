@@ -82,11 +82,18 @@ mount -nt devtmpfs none /dev
 
 # Perform filesystem check:
 if param fsck; then
-    echo $i"performing linux filesystem check on all available devices:" 
-    draw
-    for x in `blkid | grep 'TYPE="ext' | cut -d: -f1`; do e2fsck -C 0 -p $x; wait; done
-    for x in `blkid | grep 'TYPE="reiserfs"' | cut -d: -f1`; do reiserfsck -p $x; wait; done
-    draw
+    echo $i"performing linux filesystem check on all available devices:"
+    # fscknolog (PorteuX): still check, but keep the output off the console.
+    # The log is stashed and appended to the boot log further down, so it
+    # survives into /var/log/porteus-livedbg on the booted system.
+    if param fscknolog; then
+	run_fsck > /tmp/fsck.log 2>&1
+	echo $i"filesystem check done - log kept for /var/log/porteus-livedbg"
+    else
+	draw
+	run_fsck
+	draw
+    fi
 fi
 
 # Create /etc/fstab and mount devices:
@@ -808,6 +815,8 @@ fi
 echo $CFGDEV > /etc/cfgdev
 echo -e "\n# Booting device:\n$CFGDEV\n\n# data found in:\n$PTH\n\n# Changes are stored in:\n$CHANGES\n\n# Non standard /rootcopy dir:\n$ROOTCOPY\n\n# Modules activated during boot time:" >>$livedbg; cat /tmp/modules >>$livedbg
 grep "^/mnt/isoloop" $livedbg && echo "" >> $livedbg && echo "ISO=$ISOSRC" >> $livedbg
+# fscknolog kept the filesystem check quiet - preserve its log here instead
+[ -s /tmp/fsck.log ] && { echo -e "\n# Filesystem check (fscknolog):" >>$livedbg; cat /tmp/fsck.log >>$livedbg; }
 #if [ $ISO ]; then
 #	[ -d /union/mnt/isoloop ] && rmdir /union/mnt/isoloop
 #	ln -sf /mnt/live/mnt/isoloop /union/mnt/isoloop

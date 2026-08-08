@@ -59,6 +59,7 @@ runtime.
 | `nobluetooth` | PorteuX | Disable `/etc/init.d/bluetooth` |
 | `noupdateclock` | PorteuX | Disable `/etc/init.d/hwclock.sh` |
 | `rootmount` | PorteuX | Bind-mount rootcopy files instead of copying |
+| `fscknolog` | PorteuX | Run `fsck` quietly, log kept in the boot log |
 
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
 stands in for a space.
@@ -80,7 +81,6 @@ stands in for a space.
   Making the hardcoded `/srv/pxe` paths configurable is worthwhile but is a
   change to the NFS boot path, which deserves its own commit and a PXE server
   to test against.
-- `fscknolog` — cosmetic; fred's `fsck` output already differs from Porteus's.
 - `nomagic` — no DebianDog equivalent, see above.
 
 ## Testing

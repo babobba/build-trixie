@@ -113,6 +113,13 @@ else
     echo $i"detected unsupported fs - skipping fsck"
 fi }
 
+# The checks run by the 'fsck' cheatcode.  Kept in a function so that
+# 'fscknolog' can redirect all of it in one place.
+run_fsck() {
+	for x in `blkid | grep 'TYPE="ext' | cut -d: -f1`; do e2fsck -C 0 -p $x; wait; done
+	for x in `blkid | grep 'TYPE="reiserfs"' | cut -d: -f1`; do reiserfsck -p $x; wait; done
+}
+
 # Copy modules
 cpmod() { NUM=`grep -c '.' $1`
 modfile=$1
