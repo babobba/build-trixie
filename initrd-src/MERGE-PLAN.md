@@ -92,12 +92,15 @@ set and inspecting the file it is supposed to have written.
 
 ## Running the tests
 
-`initrd-src/test-cheats.sh` extracts the cheatcode block from `linuxrc`, runs
-it against a fake DebianDog root under `/tmp/cheattest`, and asserts that each
-cheatcode writes what it claims to. It needs no root and no build:
+`tests/linuxrc/` holds the unit tests. They lift the relevant region out of
+`linuxrc` (or a function out of `finit`), stub the initrd's `param`/`value`
+cheatcode readers and a `/union` that mirrors a DebianDog rootfs, and assert on
+what the code writes. No root, no built ISO:
 
-    ./initrd-src/test-cheats.sh
+    ./tests/linuxrc/run.sh
 
-The last case boots with no cheatcodes at all and asserts that `rc.local`,
-`inittab`, `/etc/default/keyboard` and the Openbox autostart files come out
-byte-identical, so a regression in the default path fails the suite.
+`test_defaults.sh` is the regression guard: it boots with no cheatcodes and
+asserts that `rc.local`, `inittab`, `/etc/default/keyboard` and the Openbox
+autostart files come out byte-identical. Known gaps are marked `xfail`, which
+does not fail the suite but does fail if the behaviour starts working, so a
+marker cannot outlive the gap it documents.
