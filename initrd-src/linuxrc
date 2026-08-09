@@ -119,17 +119,36 @@ if [ $IP ]; then BOOTDEV=network; CFGDEV=/mnt/nfs
     for x in `cut -d: -f3-4 /tmp/lspci | sed s/:/.*/g | tr a-z A-Z`; do modprobe `grep $x /lib/modules/$(uname -r)/modules.alias | tail -n1 | rev | cut -d" " -f1 | rev` 2>/dev/null; done
     ls /sys/class/net | grep -q eth || { for x in `find /lib/modules/$(uname -r)/kernel/drivers/net -name "*.ko" | sed 's/.ko//g'`; do modprobe `basename $x` 2>/dev/null; ls /sys/class/net | grep -q eth && break || modprobe -r `basename $x` 2>/dev/null; done; }
     mkdir -p /mnt/nfs/storage; udhcpc; modprobe nfsv4; mount -t nfs4 $IP:$NFSPATH /mnt/nfs -o ro,nolock 2>/dev/null || { modprobe nfsv3; mount -t nfs $IP:$NFSPATH /mnt/nfs -o ro,nolock 2>/dev/null; }
-    MAC=`ifconfig | grep eth0 | cut -d: -f5-7 | sed s/://g | cut -d" " -f1`
+    # A netbooted client is identified by its MAC.  The old pipeline kept only
+    # the last three octets, so two machines whose NICs share those would have
+    # shared one changes directory; read the whole address from sysfs instead,
+    # falling back to the old derivation if sysfs has nothing to offer.
+    MACSHORT=`ifconfig | grep eth0 | cut -d: -f5-7 | sed s/://g | cut -d" " -f1`
+    NETIF=eth0
+    [ -e /sys/class/net/$NETIF/address ] || NETIF=`ls /sys/class/net 2>/dev/null | grep -v '^lo$' | head -1`
+    MAC=`cat /sys/class/net/$NETIF/address 2>/dev/null | tr -d ':' | tr a-f A-F`
+    [ "$MAC" ] || MAC=$MACSHORT
     # Netbooted changes go to the NFS-exported storage directory when the user
     # asks for it with storage=, or with the older changes=<storage path>.
     if [ "`value storage`" ] || [ "$CHANGES" = "$STORAGE" ]; then
 	echo $i"using NFS storage $STORAGE for changes"
 	if lsmod | grep -q nfsv3; then
-	    mount -t nfs $IP:$STORAGE /mnt/nfs/storage -o rw,nolock 2>/dev/null && { mkdir -p /mnt/nfs/storage/client-$MAC/changes/home; CHANGES="/storage/client-$MAC"; }
+	    mount -t nfs $IP:$STORAGE /mnt/nfs/storage -o rw,nolock 2>/dev/null && STORMNT=yes
 	else
-	    mount -t nfs4 $IP:$STORAGE /mnt/nfs/storage -o rw,nolock 2>/dev/null && { mkdir -p /mnt/nfs/storage/client-$MAC/changes/home; CHANGES="/storage/client-$MAC"; }
+	    mount -t nfs4 $IP:$STORAGE /mnt/nfs/storage -o rw,nolock 2>/dev/null && STORMNT=yes
 	fi
-	[ "$CHANGES" = "/storage/client-$MAC" ] || echo $i"could not mount $STORAGE - changes will stay in memory"
+	if [ "$STORMNT" = yes ]; then
+	    # Keep using a directory an older initrd created under the short name,
+	    # so an existing client does not silently start from a fresh one.
+	    CLIENT=client-$MAC
+	    [ "$MACSHORT" ] && [ -d /mnt/nfs/storage/client-$MACSHORT ] && \
+		[ ! -d /mnt/nfs/storage/client-$MAC ] && CLIENT=client-$MACSHORT
+	    mkdir -p /mnt/nfs/storage/$CLIENT/changes/home
+	    CHANGES="/storage/$CLIENT"
+	    echo $i"client storage is $CLIENT"
+	else
+	    echo $i"could not mount $STORAGE - changes will stay in memory"
+	fi
     fi
     if [ $FROM ]; then
         FOLDER=$FROM/live
