@@ -29,18 +29,27 @@ assert_grep "puppy's session calls the script" \
 assert_not_grep "the commands are not duplicated into openbox" \
 	"$WORK/union/root/.config/openbox/autostart" 'xterm'
 
-echo "-- running it twice only starts the commands once"
-assert_grep "the script takes a lock"      "$SCRIPT" 'mkdir /tmp/.guiexec-cheat-'
-assert_grep "the lock is boot-scoped"      "$SCRIPT" 'boot_id'
-assert_grep "a second run exits early"     "$SCRIPT" '|| exit 0'
-# Prove it: run the generated script twice with the commands stubbed.  The
-# lock is keyed to the boot id, so clear any left by an earlier suite run --
-# which also shows the lock holds across separate processes, not just within
-# one shell.
-sed -e 's#^xterm -T hi &#echo RAN >> '"$WORK"'/ran#' -e 's#^leafpad &##' "$SCRIPT" > "$WORK/gx.sh"
+echo "-- both entry points in one session start the commands once"
+assert_grep "the script takes a lock"        "$SCRIPT" 'mkdir /tmp/.guiexec-cheat-'
+assert_grep "the lock is keyed to the X server" "$SCRIPT" 'pgrep -x Xorg'
+assert_grep "it falls back to the boot id"   "$SCRIPT" 'boot_id'
+assert_grep "a second run exits early"       "$SCRIPT" '|| exit 0'
+# Prove it by running the generated script with the commands and the X-server
+# lookup stubbed, so the session id is controllable.  Locks left by an earlier
+# suite run are cleared first; running the script as separate processes also
+# shows the lock holds across processes, not just within one shell.
+make_gx() {   # $1 = pretend Xorg pid
+	sed -e 's#^xterm -T hi &#echo RAN >> '"$WORK"'/ran#' -e 's#^leafpad &##' \
+	    -e "s#^GXSESSION=.*#GXSESSION=$1#" "$SCRIPT" > "$WORK/gx.sh"
+}
+rm -rf /tmp/.guiexec-cheat-*; rm -f "$WORK/ran"
+make_gx 4321; sh "$WORK/gx.sh"; sh "$WORK/gx.sh"
+assert_equal "one session starts them once" "1" "$(grep -c RAN "$WORK/ran" 2>/dev/null || echo 0)"
+
+echo "-- a new X session starts them again"
+make_gx 9876; sh "$WORK/gx.sh"
+assert_equal "a restarted X session re-runs them" "2" "$(grep -c RAN "$WORK/ran" 2>/dev/null || echo 0)"
 rm -rf /tmp/.guiexec-cheat-*
-rm -f "$WORK/ran"; sh "$WORK/gx.sh"; sh "$WORK/gx.sh"
-assert_equal "commands ran exactly once" "1" "$(grep -c RAN "$WORK/ran" 2>/dev/null || echo 0)"
 
 echo "-- it works on a build with no Openbox at all (Xfce, Mate, LXQt)"
 make_fakeroot

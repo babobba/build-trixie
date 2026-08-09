@@ -882,8 +882,14 @@ if [ "$GUIEXEC" ]; then
 	cat > $GX <<'GXHEAD'
 #!/bin/sh
 # generated from the guiexec= cheatcode - do not edit, it is rewritten at boot
-BOOTID=`cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo nolock`
-mkdir /tmp/.guiexec-cheat-$BOOTID 2>/dev/null || exit 0
+# The lock is keyed to the running X server, not to the boot, so that the two
+# autostart mechanisms collapse to one run within a session while logging out
+# and back in still starts the commands again, which is what "run when the
+# graphical interface loads" should mean.  Falls back to the boot id if the X
+# server cannot be identified.
+GXSESSION=`pgrep -x Xorg 2>/dev/null | head -1`
+[ "$GXSESSION" ] || GXSESSION=`cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo nolock`
+mkdir /tmp/.guiexec-cheat-$GXSESSION 2>/dev/null || exit 0
 GXHEAD
 	echo "$GUIEXEC" | tr ';' '\n' | while read -r cmd; do
 		[ "$cmd" ] && echo "`echo \"$cmd\" | tr '~' ' '` &" >> $GX

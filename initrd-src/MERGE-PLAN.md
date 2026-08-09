@@ -65,9 +65,15 @@ runtime.
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
 stands in for a space.
 
-`guiexec=` runs its commands once per boot. The lock that prevents the XDG
-entry and the Openbox entry from both firing is keyed to the boot id, so
-restarting X within a session will not start them a second time.
+`guiexec=` starts its commands once per X session. The lock that stops the XDG
+entry and the Openbox entry from both firing is keyed to the running X server,
+so logging out and back in starts them again, which is what "run when the
+graphical interface loads" should mean. If the X server cannot be identified
+the lock falls back to the boot id, degrading to once per boot rather than
+running twice.
+
+`cliexec=` stays keyed to the boot, since it stands in for a runlevel change:
+it should not re-run when someone logs out of tty1 and back in.
 
 One deliberate difference from Porteus: the default marker file used to locate
 the boot medium is the initrd itself, `initrd1.xz`, not a `.sgn` file. A
