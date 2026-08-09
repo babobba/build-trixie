@@ -52,7 +52,7 @@ runtime.
 | `volume=` | both | `amixer set Master N%`, before X starts |
 | `login=` | both | Autologin user in `/etc/inittab`, or the display manager |
 | `cliexec=` | both | Commands run before X starts |
-| `guiexec=` | both | XDG autostart entry + Openbox autostart, run once |
+| `guiexec=` | both | XDG autostart + Openbox autostart, once per X session |
 | `zram=` | both | zram swap, set up before X starts |
 | `sgnfile=` | Porteus | Alias for `cfgfile=`; `cfgfile=` wins if both given |
 | `nologin` | PorteuX | Disable autologin in `/etc/inittab` and the display manager |
