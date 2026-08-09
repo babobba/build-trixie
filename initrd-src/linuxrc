@@ -872,8 +872,9 @@ fi
 #     needs PyXDG and python3-xdg is not installed in a default image, so the
 #     XDG entry alone would never fire on the default Openbox desktop.
 #
-# The script takes a boot-scoped lock with mkdir, which is atomic, so on a
-# desktop that honours both it still runs exactly once.
+# The script takes a lock with mkdir, which is atomic, so on a desktop that
+# honours both mechanisms the commands still start exactly once.  The lock is
+# keyed to the X session - see the script itself.
 GUIEXEC=`value guiexec`
 if [ "$GUIEXEC" ]; then
 	echo $i"guiexec: $GUIEXEC"
