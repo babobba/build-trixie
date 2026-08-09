@@ -49,6 +49,14 @@ NFSPATH=`value nfspath`; [ $NFSPATH ] || NFSPATH=/srv/pxe
 # moves the storage with it; the default is the historical /srv/pxe/storage.
 STORAGE=`value storage`; [ $STORAGE ] || STORAGE=$NFSPATH/storage
 MOPT=`value mopt`; [ $MOPT ] || MOPT="noatime,nodiratime,suid,dev,exec,async"
+# readonly : never write to a discovered filesystem.  Finding the boot medium
+# means mounting every partition on the machine, and the default options are
+# read-write, so an ordinary boot updates the superblock of every ext
+# partition it finds and lets ntfs-3g write its log - before noauto unmounts
+# anything.  This makes those mounts read-only instead.  Not spelled 'ro',
+# which the kernel already defines.  Persistence needs a writable device, so a
+# changes= given alongside this will fall back to memory.
+param readonly && MOPT="ro,noatime,nodiratime"
 CHANGES=`value changes`
 PFULL=`value pfull`
 RAMSIZE=`value ramsize`; [ $RAMSIZE ] || RAMSIZE=60%

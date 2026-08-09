@@ -33,11 +33,15 @@ devpts /dev/pts devpts rw,mode=0620,gid=5 0 0
 EOF
 for x in $dev; do
     fs=`grep -w /dev/$x /tmp/devices | egrep -o ' TYPE=[^ ]+' | cut -d'"' -f2`
-    [ $fs = vfat ] && echo "/dev/$x /mnt/$x vfat $MOPT,umask=0,check=s,utf8 0 0" >>/etc/fstab || echo "/dev/$x /mnt/$x $fs $MOPT 0 0" >>/etc/fstab
+    # A read-only mount still replays a dirty ext journal, which is a write to
+    # the very filesystem readonly is meant to leave alone; noload skips that.
+    FSOPT=$MOPT
+    param readonly && case $fs in ext3|ext4) FSOPT="$MOPT,noload" ;; esac
+    [ $fs = vfat ] && echo "/dev/$x /mnt/$x vfat $FSOPT,umask=0,check=s,utf8 0 0" >>/etc/fstab || echo "/dev/$x /mnt/$x $fs $FSOPT 0 0" >>/etc/fstab
     if [ ! -d /mnt/$x ]; then
 	mkdir /mnt/$x
 	if [ $fs = ntfs ]; then
-	    ntfs-3g /dev/$x /mnt/$x -o $MOPT 2>/dev/null || { sed -i "/$x /d" /etc/fstab; rmdir /mnt/$x; }
+	    ntfs-3g /dev/$x /mnt/$x -o $FSOPT 2>/dev/null || { sed -i "/$x /d" /etc/fstab; rmdir /mnt/$x; }
 	else
 	    mount -n /mnt/$x 2>/dev/null || { modprobe $fs 2>/dev/null && mount -n /mnt/$x 2>/dev/null || { sed -i "/$x /d" /etc/fstab; rmdir /mnt/$x; }; }
 	fi
@@ -53,13 +57,15 @@ fi }
 mount_device() {
 fs=`blkid /dev/$1 | egrep -o ' TYPE=[^ ]+' | cut -d'"' -f2`
 if [ "$fs" ]; then
+    FSOPT=$MOPT
+    param readonly && case $fs in ext3|ext4) FSOPT="$MOPT,noload" ;; esac
     mkdir /mnt/$1
     if [ $fs = vfat ]; then
-	mount -n /dev/$1 /mnt/$1 -o $MOPT,umask=0,check=s,utf8 2>/dev/null || rmdir /mnt/$1
+	mount -n /dev/$1 /mnt/$1 -o $FSOPT,umask=0,check=s,utf8 2>/dev/null || rmdir /mnt/$1
     elif [ $fs = ntfs ]; then
-	ntfs-3g /dev/$1 /mnt/$1 -o $MOPT 2>/dev/null || rmdir /mnt/$1
+	ntfs-3g /dev/$1 /mnt/$1 -o $FSOPT 2>/dev/null || rmdir /mnt/$1
     else
-	mount -n /dev/$1 /mnt/$1 -o $MOPT 2>/dev/null || { modprobe $fs 2>/dev/null && mount -n /dev/$1 /mnt/$1 -o $MOPT || rmdir /mnt/$1; }
+	mount -n /dev/$1 /mnt/$1 -o $FSOPT 2>/dev/null || { modprobe $fs 2>/dev/null && mount -n /dev/$1 /mnt/$1 -o $FSOPT || rmdir /mnt/$1; }
     fi
 fi }
 
