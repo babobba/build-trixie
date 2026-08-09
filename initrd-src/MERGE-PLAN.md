@@ -109,38 +109,43 @@ and the ISO must boot to the desktop with no cheatcodes given, proving the
 defaults path is untouched. Each new code is then checked by booting with it
 set and inspecting the file it is supposed to have written.
 
-### Boot testing without waiting for a desktop
+### Boot testing
 
-Every cheatcode has finished its work before X starts, so a boot test does not
-need the desktop. Have the guest report over the serial port and stop as soon
-as it does:
+`tests/linuxrc/boot-test.sh` builds a throwaway ISO from a built `isodata`
+tree, boots it under QEMU, and checks both that the guest reaches each
+cheatcode stage and that the codes did what they claim:
 
-    label SPEED-TEST
-    menu default
-    kernel /live/vmlinuz1
-    append initrd=/live/initrd1.xz from=/ base_only cliexec=/usr/local/bin/report
+    ./tests/linuxrc/boot-test.sh            # uses trixie/isodata
+    ./tests/linuxrc/boot-test.sh path/to/isodata
 
-with `report` installed through `live/rootcopy` and starting
-`exec > /dev/ttyS0 2>&1`, then:
+The guest reports over the serial port rather than to the screen. That matters
+for more than convenience: serial records *when* something happened, so the
+test can assert `pgrep -c Xorg` is 0 at the moment `cliexec=` runs, which is
+what proves those commands are ordered before X rather than racing it. A
+screenshot can only show what is on screen when you happen to look.
 
-    qemu-system-x86_64 -accel tcg,thread=multi -m 3072 -smp 4 \
-      -cdrom test.iso -boot d -display none -serial file:serial.log
+Two stages are timed, with budgets in seconds from power-on:
 
-That reaches the report in about 85 seconds, against roughly 20 minutes to
-reach a painted desktop. Serial also timestamps *when* something happened,
-which a screenshot cannot.
+| Stage | Measured | Budget |
+| --- | --- | --- |
+| `cliexec=` reached | 85-110s | 180s (`CLI_TIMEOUT`) |
+| `guiexec=` reached | ~145s | 240s (`GUI_TIMEOUT`) |
 
-Measured on this hardware, one sample each, same ISO and same milestone:
-IDE CD-ROM with single-threaded TCG 90s, IDE with `thread=multi` 85s, virtio
-disk with `thread=multi` 80s. The differences between the three are close to
-run-to-run noise, because under TCG the boot is CPU-bound in instruction
-translation rather than I/O-bound. Choosing the earlier milestone is what
-makes the difference, not the disk interface.
+The measurements are from an emulated host with no KVM and a `base_only` boot;
+the budgets leave headroom for a slower machine or a fuller module set, and
+both can be raised through those environment variables.
 
-The virtio row matters for a different reason: before the VM drivers were
-added it did not boot at all. Note that QEMU rejects UNIX socket paths longer
-than 107 bytes, which is easy to hit when putting monitor sockets under a long
-scratchpad path.
+One boot covers every cheatcode. By the time `cliexec=` runs, everything the
+initrd wrote is on disk, and `zram=` and `volume=` have already run; only
+`guiexec=` needs a desktop session, and that arrives about 35 seconds later.
+An earlier figure of "20 minutes to test the GUI" was an artefact of watching
+screenshots until the wallpaper and conky had finished painting, long after
+the session autostart had already run the commands.
+
+If you are iterating on `linuxrc` alone, there is no need to rebuild the whole
+image: unpack `initrd1.xz`, replace the script, repack, and rebuild only the
+ISO. A full `build-trixie` run is around 25 minutes even with a warm apt
+cache, dominated by package installation and squashfs compression.
 
 ## Running the tests
 
