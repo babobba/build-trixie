@@ -103,6 +103,39 @@ and the ISO must boot to the desktop with no cheatcodes given, proving the
 defaults path is untouched. Each new code is then checked by booting with it
 set and inspecting the file it is supposed to have written.
 
+### Boot testing without waiting for a desktop
+
+Every cheatcode has finished its work before X starts, so a boot test does not
+need the desktop. Have the guest report over the serial port and stop as soon
+as it does:
+
+    label SPEED-TEST
+    menu default
+    kernel /live/vmlinuz1
+    append initrd=/live/initrd1.xz from=/ base_only cliexec=/usr/local/bin/report
+
+with `report` installed through `live/rootcopy` and starting
+`exec > /dev/ttyS0 2>&1`, then:
+
+    qemu-system-x86_64 -accel tcg,thread=multi -m 3072 -smp 4 \
+      -cdrom test.iso -boot d -display none -serial file:serial.log
+
+That reaches the report in about 85 seconds, against roughly 20 minutes to
+reach a painted desktop. Serial also timestamps *when* something happened,
+which a screenshot cannot.
+
+Measured on this hardware, one sample each, same ISO and same milestone:
+IDE CD-ROM with single-threaded TCG 90s, IDE with `thread=multi` 85s, virtio
+disk with `thread=multi` 80s. The differences between the three are close to
+run-to-run noise, because under TCG the boot is CPU-bound in instruction
+translation rather than I/O-bound. Choosing the earlier milestone is what
+makes the difference, not the disk interface.
+
+The virtio row matters for a different reason: before the VM drivers were
+added it did not boot at all. Note that QEMU rejects UNIX socket paths longer
+than 107 bytes, which is easy to hit when putting monitor sockets under a long
+scratchpad path.
+
 ## Running the tests
 
 `tests/linuxrc/` holds the unit tests. They lift the relevant region out of
