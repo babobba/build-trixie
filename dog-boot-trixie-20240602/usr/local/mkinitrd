@@ -115,6 +115,10 @@ copy_including_deps /$LMK/kernel/drivers/md/dm-crypt.*
 
 copy_including_deps /$LMK/kernel/drivers/pci/controller/vmd.*
 
+# blockdev, for the writeblock cheatcode.  busybox has no such applet, so
+# without this the cheatcode can only warn that it cannot protect anything.
+copy_including_deps /sbin/blockdev
+
 # virtual machine storage and network drivers.  Without these the live system
 # cannot boot under QEMU/KVM, libvirt or Proxmox, which all default to virtio
 # storage, nor on Hyper-V, VMware or Xen.  virtio core and virtio_pci are

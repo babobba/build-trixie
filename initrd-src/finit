@@ -36,7 +36,7 @@ for x in $dev; do
     # A read-only mount still replays a dirty ext journal, which is a write to
     # the very filesystem readonly is meant to leave alone; noload skips that.
     FSOPT=$MOPT
-    param readonly && case $fs in ext3|ext4) FSOPT="$MOPT,noload" ;; esac
+    [ "$ROMOUNT" ] && case $fs in ext3|ext4) FSOPT="$MOPT,noload" ;; esac
     [ $fs = vfat ] && echo "/dev/$x /mnt/$x vfat $FSOPT,umask=0,check=s,utf8 0 0" >>/etc/fstab || echo "/dev/$x /mnt/$x $fs $FSOPT 0 0" >>/etc/fstab
     if [ ! -d /mnt/$x ]; then
 	mkdir /mnt/$x
@@ -58,7 +58,7 @@ mount_device() {
 fs=`blkid /dev/$1 | egrep -o ' TYPE=[^ ]+' | cut -d'"' -f2`
 if [ "$fs" ]; then
     FSOPT=$MOPT
-    param readonly && case $fs in ext3|ext4) FSOPT="$MOPT,noload" ;; esac
+    [ "$ROMOUNT" ] && case $fs in ext3|ext4) FSOPT="$MOPT,noload" ;; esac
     mkdir /mnt/$1
     if [ $fs = vfat ]; then
 	mount -n /dev/$1 /mnt/$1 -o $FSOPT,umask=0,check=s,utf8 2>/dev/null || rmdir /mnt/$1
