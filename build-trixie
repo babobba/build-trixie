@@ -884,9 +884,11 @@ echo "At this point you may want to add/edit/delete files in chroot folder"
 echo "Also you can add .squashfs modules in the isodata/live folder, to be included in the ISO"
 read -sp "Press ENTER to continue . . . "
 echo
-echo -e "\e[0;33mNow we will create compressed kernel: k-$kernel.squashfs and filesystem: '01-filesystem.squashfs'\nPlease enter your choice, xz compression will give smaller size than gzip,\033[0m"
-echo -e "\e[0;33mbut xz takes much longer time to compress\033[0m"
-read -p "Type gzip or xz : " choice
+echo -e "\e[0;33mNow we will create compressed kernel: k-$kernel.squashfs and filesystem: '01-filesystem.squashfs'\nPlease enter your choice:\033[0m"
+echo -e "\e[0;33m gzip - quickest to compress, largest image\033[0m"
+echo -e "\e[0;33m xz   - smallest image, much the slowest to compress, slowest to read at boot\033[0m"
+echo -e "\e[0;33m zstd - close to xz in size, far quicker to compress and to read at boot\033[0m"
+read -p "Type gzip, xz or zstd : " choice
 
 case "$choice" in 
   gzip)
@@ -901,8 +903,14 @@ mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp xz -b 512k -Xbcj 
 echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
 mksquashfs chroot isodata/live/01-filesystem.squashfs -comp xz -b 512k -Xbcj x86
 ;;
+  zstd)
+echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs . . .\033[0m"
+mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp zstd -Xcompression-level 19 -b 512k
+echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
+mksquashfs chroot isodata/live/01-filesystem.squashfs -comp zstd -Xcompression-level 19 -b 512k
+;;
 *)
-echo -e "\e[0;31mNot a valid choice, please try again, type: gzip or xz \033[0m"
+echo -e "\e[0;31mNot a valid choice, please try again, type: gzip, xz or zstd \033[0m"
 sleep 1
 TRYAGAIN=yes
 ;;
@@ -910,7 +918,7 @@ esac
 
 if [ "$TRYAGAIN" = "yes" ]; then
 ### Second chance in case having made a typo
-read -p "Type gzip or xz : " choice
+read -p "Type gzip, xz or zstd : " choice
 
 case "$choice" in 
   gzip)
@@ -924,6 +932,12 @@ echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs
 mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp xz -b 512k -Xbcj x86
 echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
 mksquashfs chroot isodata/live/01-filesystem.squashfs -comp xz -b 512k -Xbcj x86
+;;
+  zstd)
+echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs . . .\033[0m"
+mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp zstd -Xcompression-level 19 -b 512k
+echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
+mksquashfs chroot isodata/live/01-filesystem.squashfs -comp zstd -Xcompression-level 19 -b 512k
 ;;
 *)
 echo -e "\e[0;31mNot a valid choice, exiting now... \033[0m"
