@@ -641,6 +641,62 @@ else
     fi
 fi
 
+# Magic folders (Porteus).  Bind individual directories from real storage over
+# paths in the live system, so changes to just those paths persist without a
+# whole-system changes= file.  The pairs are listed in /etc/magic_folders,
+# which normally arrives through rootcopy - hence the placement here, straight
+# after rootcopy has been applied.
+#
+# One pair per line, source first, then the path inside the live system:
+#
+#     /mnt/sdb1/Downloads  /home/puppy/Downloads
+#     /mnt/sdb1/mail.dat   /home/puppy/.thunderbird
+#
+# A source directory is bind-mounted; a source file is treated as a filesystem
+# image and loop-mounted, which is how FAT and NTFS media are supported, since
+# they cannot hold a bind-mountable Linux directory tree.
+#
+# nomagic skips the lot, which is the point of the cheatcode: a bad pairing
+# otherwise leaves you with no way to boot past it.
+if param nomagic; then
+    echo $i"nomagic - skipping magic folders"
+else
+    MAGICCFG=/union/etc/magic_folders
+    [ -f "$MAGICCFG" ] || MAGICCFG=/union/etc/magic_folders/folders.cfg
+    if [ -f "$MAGICCFG" ]; then
+	echo $i"binding magic folders from `echo $MAGICCFG | sed s@/union@@`"
+	while read -r MSRC MDST MREST; do
+	    case "$MSRC" in ''|\#*) continue ;; esac
+	    [ "$MDST" ] || { echo $i"  skipping '$MSRC' - no target given"; continue; }
+	    # A target must stay inside the live system.  '..' would let a pair
+	    # bind over the initrd itself.
+	    case "$MDST" in
+		/*) ;;
+		*) echo $i"  skipping $MDST - target must be an absolute path"; continue ;;
+	    esac
+	    case "$MDST" in
+		*..*) echo $i"  skipping $MDST - target may not contain '..'"; continue ;;
+	    esac
+	    # Binding over these breaks the boot outright.
+	    case "$MDST" in
+		/|/proc|/sys|/dev|/mnt|/memory|/union)
+		    echo $i"  refusing $MDST - binding there would break the boot"; continue ;;
+	    esac
+	    if [ -d "$MSRC" ]; then
+		mkdir -p "/union$MDST" 2>/dev/null
+		mount -o bind "$MSRC" "/union$MDST" 2>/dev/null \
+		    && echo "  $m  $MDST" || echo $i"  failed to bind $MSRC"
+	    elif [ -f "$MSRC" ]; then
+		mkdir -p "/union$MDST" 2>/dev/null
+		mount -o loop "$MSRC" "/union$MDST" 2>/dev/null \
+		    && echo "  $m  $MDST (image)" || echo $i"  failed to mount image $MSRC"
+	    else
+		echo $i"  skipping $MDST - source $MSRC not found"
+	    fi
+	done < "$MAGICCFG"
+    fi
+fi
+
 ################################################################################
 mkdir -p /union/dev /union/mnt /union/live /union/proc /union/sys /union/srv /union/media /union/run /union/tmp /union/var/tmp
 chmod 1777 /union/tmp; chmod 1777 /union/var/tmp

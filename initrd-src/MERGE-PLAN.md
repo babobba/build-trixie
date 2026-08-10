@@ -61,6 +61,7 @@ runtime.
 | `rootmount` | PorteuX | Bind-mount rootcopy files; recreate dirs/symlinks |
 | `storage=` | Porteus | Where a netbooted client's changes are kept |
 | `fscknolog` | PorteuX | Run `fsck` quietly, log kept in the boot log |
+| `nomagic` | Porteus | Skip binding the magic folders |
 
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
 stands in for a space.
@@ -87,10 +88,9 @@ silently ignored, so a typo fails loudly instead of booting the wrong medium.
   `rc.networkmanager`, `rc.bluetooth`). None exist in a DebianDog image — the
   image ships only `/etc/rc.d/rc.network` — so both codes silently did
   nothing. They now act on `/etc/init.d/`.
-- `nomagic` appeared in `isodata/isolinux/live.cfg` but is not implemented
-  anywhere in the initrd. Porteus's "magic folders" have no DebianDog
-  equivalent, so the dead cheatcode is removed from the boot menu rather than
-  implemented.
+- `nomagic` appeared in `isodata/isolinux/live.cfg` while nothing in the
+  initrd implemented it. It is now real: magic folders are implemented, and
+  `nomagic` skips them.
 
 ## Deliberately not ported
 
@@ -100,7 +100,36 @@ silently ignored, so a typo fails loudly instead of booting the wrong medium.
   need `tftpd-hpa`, a DHCP server and `nfs-kernel-server` added to the config
   first, at which point it is a feature in its own right rather than a
   cheatcode port.
-- `nomagic` — no DebianDog equivalent, see above.
+
+## Magic folders
+
+Porteus's magic folders bind individual directories from real storage over
+paths in the live system, so those paths persist without a whole-system
+`changes=` file — useful for a Downloads folder or a mail profile when you do
+not want everything else saved.
+
+The pairs live in `/etc/magic_folders`, one per line, source first:
+
+    # anything after a # is ignored
+    /mnt/sdb1/Downloads  /home/puppy/Downloads
+    /mnt/sdb1/mail.dat   /home/puppy/.thunderbird
+
+A source directory is bind-mounted. A source *file* is treated as a filesystem
+image and loop-mounted, which is how FAT and NTFS media are supported: they
+cannot hold a bind-mountable Linux directory tree, so Porteus uses a container
+file there and this does the same.
+
+The file normally arrives through `rootcopy`, so the binding happens straight
+after rootcopy is applied and before the switch to the new root.
+
+Targets are checked before anything is mounted. A target must be absolute, may
+not contain `..`, and may not be `/`, `/proc`, `/sys`, `/dev`, `/mnt`,
+`/memory` or `/union` — binding over any of those breaks the boot outright,
+and a live system that cannot boot is exactly the situation `nomagic` exists
+to rescue. Bad pairs are named on the console rather than skipped silently.
+
+With `readonly` or `forensic` given, magic folders still bind but inherit the
+read-only mount, so writes to them fail.
 
 ## Testing
 
