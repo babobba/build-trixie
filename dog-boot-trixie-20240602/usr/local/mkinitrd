@@ -115,7 +115,7 @@ copy_including_deps /$LMK/kernel/drivers/md/dm-crypt.*
 
 copy_including_deps /$LMK/kernel/drivers/pci/controller/vmd.*
 
-# blockdev, for the writeblock cheatcode.  busybox has no such applet, so
+# blockdev, for the forensic cheatcode.  busybox has no such applet, so
 # without this the cheatcode can only warn that it cannot protect anything.
 copy_including_deps /sbin/blockdev
 

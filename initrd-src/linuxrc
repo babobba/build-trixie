@@ -57,13 +57,13 @@ MOPT=`value mopt`; [ $MOPT ] || MOPT="noatime,nodiratime,suid,dev,exec,async"
 # which the kernel already defines.  Persistence needs a writable device, so a
 # changes= given alongside this will fall back to memory.
 #
-# writeblock goes further and sets the kernel's read-only flag on the devices
+# forensic goes further and sets the kernel's read-only flag on the devices
 # themselves; it has to imply read-only mounts as well, because a read-write
 # mount of a device the block layer has marked read-only simply fails, and the
 # boot medium would never be found.
 ROMOUNT=
 param readonly && ROMOUNT=yes
-param writeblock && ROMOUNT=yes
+param forensic && ROMOUNT=yes
 [ "$ROMOUNT" ] && MOPT="ro,noatime,nodiratime"
 export ROMOUNT
 CHANGES=`value changes`
@@ -107,14 +107,19 @@ fi
 
 mount -nt devtmpfs none /dev
 
-# writeblock : set the kernel read-only flag on every disk and partition, so
-# the block layer refuses writes no matter what asks for them.  Done here,
-# after /dev is populated and before fstab() mounts anything.  Loop, ram and
+# forensic : set the kernel read-only flag on every disk and partition, so the
+# block layer refuses writes no matter what asks for them.  Done here, after
+# /dev is populated and before fstab() mounts anything.  Loop, ram and
 # device-mapper nodes are left alone: the initrd needs loop to mount the
 # squashfs and any ISO or changes file.
-if param writeblock; then
+#
+# The name describes the intent, not a guarantee.  This is a kernel flag: root
+# can clear it with blockdev --setrw, it does not cover SCSI passthrough, and
+# blkid still reads every device to identify it.  It removes the writes an
+# ordinary boot makes.  Evidence handling still wants a hardware write blocker.
+if param forensic; then
     if [ -x /bin/blockdev ] || [ -x /sbin/blockdev ]; then
-	echo -n $i"write-blocking devices:"
+	echo -n $i"forensic - setting devices read-only:"
 	for D in /sys/block/*; do
 	    [ -d "$D" ] || continue
 	    DN=`basename $D`
@@ -133,16 +138,16 @@ if param writeblock; then
 	    done
 	done
 	echo
-	echo $i"[1;33m""this is a kernel flag, not a hardware write blocker""[0m"
+	echo $i"[1;33m""kernel flag only - not a hardware write blocker""[0m"
     else
-	echo $i"[1;31m""writeblock: blockdev is missing from the initrd - NOT protected""[0m"
+	echo $i"[1;31m""forensic: blockdev is missing from the initrd - NOT protected""[0m"
 	sleep 5
     fi
 fi
 
 # Perform filesystem check:
 if param fsck && [ "$ROMOUNT" ]; then
-    echo $i"skipping fsck - readonly/writeblock is in force and fsck must write"
+    echo $i"skipping fsck - readonly/forensic is in force and fsck must write"
 elif param fsck; then
     echo $i"performing linux filesystem check on all available devices:"
     # fscknolog (PorteuX): still check, but keep the output off the console.

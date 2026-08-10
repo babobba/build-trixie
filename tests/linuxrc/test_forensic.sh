@@ -1,5 +1,5 @@
 #!/bin/sh
-# writeblock : set the kernel read-only flag on every disk and partition.
+# forensic : set the kernel read-only flag on every disk and partition.
 #
 # blockdev is stubbed and the sysfs tree is faked, so the test asserts on which
 # devices would have been flagged.
@@ -35,7 +35,7 @@ run_wb() {   # $1 = cmdline
 		echo 'sleep() { :; }'
 		# -b is false for our stand-ins, so treat any existing file as a device
 		echo 'test_b() { [ -e "$1" ]; }'
-		extract_region '^# writeblock : set the kernel read-only flag' '^# Perform filesystem check:' \
+		extract_region '^# forensic : set the kernel read-only flag' '^# Perform filesystem check:' \
 			| sed -e "s#/sys/block#$WORK/sys/block#g" \
 			      -e "s#\[ -b /dev/\\\$PN \]#test_b $WORK/dev/\$PN#" \
 			      -e "s#blockdev --setro /dev/#blockdev --setro $WORK/dev/#" \
@@ -49,8 +49,8 @@ echo "-- without the cheatcode nothing is touched"
 fake_sys; run_wb "quiet from=/"
 assert_equal "no device is flagged" "" "$(cat "$WORK/flagged")"
 
-echo "-- writeblock flags disks and their partitions"
-fake_sys; run_wb "quiet from=/ writeblock"
+echo "-- forensic flags disks and their partitions"
+fake_sys; run_wb "quiet from=/ forensic"
 for d in sda sda1 sda2 sdb nvme0n1 nvme0n1p1; do
 	assert_grep "$d is set read-only" "$WORK/flagged" "--setro .*/dev/$d\$"
 done
@@ -65,11 +65,11 @@ assert_not_grep "sysfs queue dir is not treated as a device" "$WORK/flagged" '/d
 assert_equal "each device is flagged once" "6" "$(wc -l < "$WORK/flagged" | tr -d ' ')"
 
 echo "-- the user is told what happened, and what it is not"
-assert_grep "devices are listed"        "$WORK/output" 'write-blocking devices:'
+assert_grep "devices are listed"        "$WORK/output" 'setting devices read-only'
 assert_grep "the limitation is stated"  "$WORK/output" 'not a hardware write blocker'
 
 echo "-- a missing blockdev must warn loudly rather than pretend"
-fake_sys; NO_BLOCKDEV=1 run_wb "quiet from=/ writeblock"
+fake_sys; NO_BLOCKDEV=1 run_wb "quiet from=/ forensic"
 assert_grep "the failure is explicit" "$WORK/output" 'NOT protected'
 assert_equal "nothing was flagged" "" "$(cat "$WORK/flagged")"
 

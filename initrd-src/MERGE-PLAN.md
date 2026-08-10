@@ -61,6 +61,8 @@ runtime.
 | `rootmount` | PorteuX | Bind-mount rootcopy files; recreate dirs/symlinks |
 | `storage=` | Porteus | Where a netbooted client's changes are kept |
 | `fscknolog` | PorteuX | Run `fsck` quietly, log kept in the boot log |
+| `readonly` | new | Mount discovered filesystems read-only (`noload` on ext) |
+| `forensic` | new | `blockdev --setro` on every disk and partition |
 
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
 stands in for a space.
@@ -80,6 +82,40 @@ the boot medium is the initrd itself, `initrd1.xz`, not a `.sgn` file. A
 Porteus boot line that relies on the default therefore has to name its marker
 explicitly with `sgnfile=`. A marker that cannot be found is fatal rather than
 silently ignored, so a typo fails loudly instead of booting the wrong medium.
+
+## Not writing to the machine's disks
+
+Finding the boot medium means mounting every partition, and the default mount
+options are read-write, so an ordinary boot updates the superblock of every
+ext partition it finds and lets ntfs-3g write its log. `noauto` does not
+prevent that: it unmounts afterwards, so it limits what the session can reach
+but not what the boot already wrote.
+
+`readonly` mounts them read-only instead, through the same `MOPT` that
+`fstab()` and `mount_device()` already use. ext3 and ext4 additionally get
+`noload`, because a read-only mount still replays a dirty journal, and that
+replay is a write to the filesystem the cheatcode exists to leave alone.
+
+`forensic` adds the block layer's read-only flag on every disk and partition
+via `blockdev --setro`, before anything is mounted. It implies `readonly` out
+of necessity, not caution: a read-write mount of a device the block layer has
+marked read-only fails, so without read-only mount options the boot medium
+would never be found.
+
+Neither is a write blocker, and the name `forensic` describes the intent
+rather than a guarantee. Root can clear the flag with `blockdev --setrw`, it
+does not cover SCSI passthrough, and `blkid` still reads every device to
+identify it. Evidence handling wants hardware write blocking. What these do is
+remove the writes an ordinary boot makes.
+
+Both are opt-in. Persistence bind-mounts and loop-mounts under `/mnt/<dev>` in
+fifteen places, all needing a writable filesystem, so a read-only default
+would break `changes=` for everyone; given either code, `changes=` falls back
+to memory through the existing `is_writable` path. `fsck` is skipped for the
+same reason.
+
+`mopt=ro,noatime` achieves much of `readonly` on an unmodified initrd, if you
+need it before this merges.
 
 ## Bugs fixed alongside
 
