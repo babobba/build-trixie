@@ -163,6 +163,20 @@ to rescue. Bad pairs are named on the console rather than skipped silently.
 With `readonly` or `forensic` given, magic folders still bind but inherit the
 read-only mount, so writes to them fail.
 
+`tests/linuxrc/boot-test-nomagic.sh` boots this twice from one ISO. The first
+boot delivers an `/etc/magic_folders` through `rootcopy` that exercises every
+branch at once — a good pair, a source on a device that does not exist, a
+relative target, a target containing `..`, a pair with no target at all, and a
+pair aiming at `/proc` — and then checks from inside the booted system that the
+good pair is a live mountpoint holding the file from the disk, that `/proc` is
+still a procfs, and that nothing was created for the rejected pairs. The second
+boot adds `nomagic` and requires the first boot's effect to be absent.
+
+The scratch disk it binds from is partitioned, so the source path is
+`/mnt/sda1/...`. The config lists `/mnt/sdb1/...` as well; whichever does not
+exist reports itself on the console, which is the "source not found" case
+tested for free.
+
 ## Testing
 
 `build-trixie configs-trixie/default.conf` must still produce a bootable ISO,
