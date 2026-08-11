@@ -825,6 +825,99 @@ if [ "$CLIEXEC" ]; then
 	done
 fi
 
+# pxe (Porteus): serve this live system to other machines over the network.
+# Porteus starts tftpd, a DHCP server and an NFS server; the equivalent here is
+# dnsmasq (which does TFTP and PXE in one) plus nfs-kernel-server.  Neither is
+# in a default image, so the generated script checks for them and says what is
+# missing rather than half-starting a broken server.
+#
+# What it serves is exactly what this initrd already knows how to consume as a
+# client: the boot line it writes uses ip= and nfspath=, and the per-client
+# storage directory is the one storage= expects.
+#
+# The live directory is bind-mounted into the export rather than copied - the
+# export root lives in the RAM overlay, and copying a 570 MB squashfs into it
+# would run the machine out of memory.
+if param pxe; then
+	echo $i"pxe - PXE services will start once the system is up"
+	mkdir -p /union/usr/local/bin 2>/dev/null
+	PXS=/union/usr/local/bin/pxe-server
+	cat > $PXS <<PXEHEAD
+#!/bin/sh
+# generated from the pxe cheatcode - do not edit, it is rewritten at boot
+PXEROOT=$NFSPATH
+LIVEDIR=/mnt/live$PTH
+PXEHEAD
+	cat >> $PXS <<'PXEBODY'
+# The initrd's own root is visible at /mnt/live once booted, so $LIVEDIR
+# normally resolves.  Under copy2ram it points into RAM instead, so fall back
+# to whichever mounted medium actually holds the kernel.
+[ -f "$LIVEDIR/vmlinuz1" ] || for d in /mnt/*/live /mnt/live/mnt/*/live; do
+	[ -f "$d/vmlinuz1" ] && { LIVEDIR=$d; break; }
+done
+[ -f "$LIVEDIR/vmlinuz1" ] || { echo "pxe: cannot find the live directory"; exit 1; }
+
+MISS=
+command -v dnsmasq >/dev/null || MISS="$MISS dnsmasq"
+command -v exportfs >/dev/null || MISS="$MISS nfs-kernel-server"
+[ -f /usr/lib/PXELINUX/pxelinux.0 ] || MISS="$MISS pxelinux"
+if [ "$MISS" ]; then
+	echo "pxe: not starting, these are not installed:$MISS"
+	echo "pxe: build with configs-trixie/default-pxe.conf to include them"
+	exit 1
+fi
+
+SRVIP=`ip route get 1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p'`
+[ "$SRVIP" ] || SRVIP=`hostname -I 2>/dev/null | cut -d' ' -f1`
+[ "$SRVIP" ] || { echo "pxe: no IP address yet, not starting"; exit 1; }
+
+mkdir -p "$PXEROOT/live" "$PXEROOT/pxelinux.cfg" "$PXEROOT/storage"
+mountpoint -q "$PXEROOT/live" || mount --bind "$LIVEDIR" "$PXEROOT/live"
+
+cp -f /usr/lib/PXELINUX/pxelinux.0 "$PXEROOT/" 2>/dev/null
+for m in ldlinux.c32 libcom32.c32 libutil.c32; do
+	cp -f /usr/lib/syslinux/modules/bios/$m "$PXEROOT/" 2>/dev/null
+done
+
+# The client boot line uses the cheatcodes this initrd already implements.
+cat > "$PXEROOT/pxelinux.cfg/default" <<CFG
+DEFAULT live
+PROMPT 0
+TIMEOUT 50
+LABEL live
+  KERNEL live/vmlinuz1
+  APPEND initrd=live/initrd1.xz ip=:$SRVIP nfspath=$PXEROOT storage=$PXEROOT/storage
+CFG
+
+# Read-only for the system itself; only the per-client storage is writable.
+grep -q "^$PXEROOT " /etc/exports 2>/dev/null || \
+	echo "$PXEROOT *(ro,sync,no_subtree_check,no_root_squash,crossmnt)" >> /etc/exports
+grep -q "^$PXEROOT/storage " /etc/exports 2>/dev/null || \
+	echo "$PXEROOT/storage *(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
+
+# proxy mode: dnsmasq answers PXE requests alongside the network's existing
+# DHCP server instead of handing out addresses itself.  A second DHCP server
+# on someone else's network is a good way to break it.
+mkdir -p /etc/dnsmasq.d
+cat > /etc/dnsmasq.d/pxe.conf <<CFG
+port=0
+enable-tftp
+tftp-root=$PXEROOT
+dhcp-range=$SRVIP,proxy
+pxe-service=x86PC,"DebianDog live",pxelinux
+CFG
+
+[ -x /etc/init.d/rpcbind ] && /etc/init.d/rpcbind start >/dev/null 2>&1
+[ -x /etc/init.d/nfs-kernel-server ] && /etc/init.d/nfs-kernel-server start >/dev/null 2>&1
+exportfs -ra 2>/dev/null
+[ -x /etc/init.d/dnsmasq ] && /etc/init.d/dnsmasq restart >/dev/null 2>&1
+echo "pxe: serving $PXEROOT from $SRVIP (proxy DHCP, TFTP, NFS)"
+exit 0
+PXEBODY
+	chmod +x $PXS
+	echo "/usr/local/bin/pxe-server || true" >> $CHEATRC
+fi
+
 # Everything collected above goes into one script, run before the graphical
 # session starts.  It is called from two places because neither is sufficient:
 #

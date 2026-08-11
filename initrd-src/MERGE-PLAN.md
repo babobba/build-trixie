@@ -61,6 +61,7 @@ runtime.
 | `rootmount` | PorteuX | Bind-mount rootcopy files; recreate dirs/symlinks |
 | `storage=` | Porteus | Where a netbooted client's changes are kept |
 | `fscknolog` | PorteuX | Run `fsck` quietly, log kept in the boot log |
+| `pxe` | Porteus | Serve this live system to other machines |
 
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
 stands in for a space.
@@ -92,15 +93,36 @@ silently ignored, so a typo fails loudly instead of booting the wrong medium.
   equivalent, so the dead cheatcode is removed from the boot menu rather than
   implemented.
 
-## Deliberately not ported
+## Serving other machines with `pxe`
 
-- `pxe` — on Porteus this turns the booted machine into a PXE *server*, by
-  starting tftpd, dhcpcd and an NFS server. None of those daemons is in a
-  DebianDog image, so there is nothing for the cheatcode to start. It would
-  need `tftpd-hpa`, a DHCP server and `nfs-kernel-server` added to the config
-  first, at which point it is a feature in its own right rather than a
-  cheatcode port.
-- `nomagic` — no DebianDog equivalent, see above.
+On Porteus this turns the booted machine into a PXE server. The equivalent
+here is `dnsmasq`, which does TFTP and PXE in one, plus `nfs-kernel-server`
+and `pxelinux`. None of those is in a default image, so build with
+`configs-trixie/default-pxe.conf`, which is `default.conf` plus those four
+packages.
+
+What it serves is what this initrd already knows how to consume. The boot line
+written into `pxelinux.cfg/default` uses `ip=` and `nfspath=`, and points
+`storage=` at the per-client directory, so a client netboots with no
+cheatcodes of its own and gets persistence for free.
+
+The live tree is bind-mounted into the export rather than copied. The export
+root sits in the RAM overlay, and copying a 570 MB squashfs into it would run
+the machine out of memory.
+
+Two deliberate choices about not breaking someone else's network. `dnsmasq`
+runs in **proxy DHCP** mode: it answers PXE requests alongside whatever DHCP
+server the network already has instead of handing out addresses, because a
+second DHCP server on a network you do not own is a good way to break it. And
+the export is read-only apart from the per-client storage directory, so a
+netbooted client cannot write over the system every other client is booting.
+
+If a package is missing the generated script names it and stops, rather than
+half-starting a server that appears to work.
+
+Not verified end to end: that needs two machines, or two VMs on one virtual
+network, and the tests cover the generated configuration rather than a real
+client completing a netboot.
 
 ## Testing
 
