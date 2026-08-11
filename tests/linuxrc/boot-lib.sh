@@ -6,6 +6,11 @@
 # that, a branch's own changes are never actually booted, and the test passes
 # by testing the previous branch's code.
 #
+# console=ttyS0 is on the boot line so the initrd's own messages reach the
+# serial log too.  Without it a cheatcode that reports its own failure on the
+# console is invisible to the test, and a silent no-op is indistinguishable
+# from success.
+#
 # Callers set these before sourcing:
 #   CODES    extra cheatcodes appended to the boot line
 #   REPORT   extra shell added to the in-guest report (writes to /dev/ttyS0)
@@ -54,8 +59,15 @@ repack_initrd() {
 			if [ -f "$SQ/sbin/blockdev" ]; then
 				mkdir -p "$IRD/sbin"
 				cp -f "$SQ/sbin/blockdev" "$IRD/sbin/blockdev"
-				# blockdev is dynamically linked; bring its libraries too
-				for lib in $(ldd "$SQ/sbin/blockdev" 2>/dev/null | sed -n 's/.*=> \([^ ]*\).*/\1/p'); do
+				# blockdev is dynamically linked; bring its libraries AND the
+				# dynamic loader.  The loader appears in ldd output as a bare
+				# path with no "=>", so matching only "=>" lines leaves the
+				# binary unable to execute at all - which looks exactly like
+				# the cheatcode silently doing nothing.  This mirrors the
+				# parsing mkinitrd already uses.
+				for lib in $(ldd "$SQ/sbin/blockdev" 2>/dev/null \
+				             | sed -r "s/.*=>//; s/[(].*//; s/^\s+|\s+$//" \
+				             | grep "^/"); do
 					[ -f "$SQ$lib" ] && { mkdir -p "$IRD$(dirname "$lib")"; cp -f "$SQ$lib" "$IRD$lib"; }
 				done
 				echo "   injected blockdev into the initrd (as mkinitrd does)"
@@ -94,7 +106,7 @@ bt_build() {
 label BOOT-TEST
 menu default
 kernel /live/vmlinuz1
-append initrd=/live/initrd1.xz from=/ base_only $CODES cliexec=/usr/local/bin/rcli guiexec=/usr/local/bin/rgui
+append initrd=/live/initrd1.xz console=ttyS0,115200 from=/ base_only $CODES cliexec=/usr/local/bin/rcli guiexec=/usr/local/bin/rgui
 EOF
 
 	( cd "$WORK/iso" && xorriso -as mkisofs -r -J -joliet-long -l \

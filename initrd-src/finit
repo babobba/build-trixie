@@ -294,18 +294,18 @@ rootcopy_apply() {
 			rel=${f#$SRC}
 			case "$rel" in /*) ;; *) rel="/$rel" ;; esac
 			if [ -L "$f" ]; then
-				mkdir -p "`dirname \"/union$rel\"`" 2>/dev/null
+				mkdir -p "/union${rel%/*}" 2>/dev/null
 				cp -af "$f" "/union$rel" 2>/dev/null
 			elif [ -d "$f" ]; then
 				mkdir -p "/union$rel" 2>/dev/null
 			elif [ -f "$f" ]; then
 				if [ ! -f "/union$rel" ]; then
-					mkdir -p "`dirname \"/union$rel\"`" 2>/dev/null
+					mkdir -p "/union${rel%/*}" 2>/dev/null
 					: > "/union$rel" 2>/dev/null || continue
 				fi
 				mount -o bind "$f" "/union$rel" 2>/dev/null
 			else
-				mkdir -p "`dirname \"/union$rel\"`" 2>/dev/null
+				mkdir -p "/union${rel%/*}" 2>/dev/null
 				cp -af "$f" "/union$rel" 2>/dev/null
 			fi
 		done
