@@ -101,6 +101,11 @@ bt_build() {
 	chmod +x "$WORK/iso/live/rootcopy/usr/local/bin/rcli" \
 	         "$WORK/iso/live/rootcopy/usr/local/bin/rgui"
 
+	# A test that needs more than rcli/rgui on the medium - a config file
+	# delivered through rootcopy, say - defines bt_extra_setup and gets its
+	# hands on $WORK/iso before the image is closed.
+	command -v bt_extra_setup >/dev/null 2>&1 && bt_extra_setup
+
 	cat >> "$WORK/iso/isolinux/live.cfg" <<EOF
 
 label BOOT-TEST
@@ -116,17 +121,42 @@ EOF
 	    -o "$WORK/boot-test.iso" . ) >"$WORK/xorriso.log" 2>&1 \
 	    || bt_fail "xorriso failed, see $WORK/xorriso.log"
 
-	if [ "$SCRATCH" = 1 ]; then
-		# A disk for the guest to find, so the mount options it chooses can be
-		# observed.  Left dirty-free and unremarkable on purpose.
-		dd if=/dev/zero of="$WORK/scratch.img" bs=1M count=64 status=none
-		mkfs.ext4 -q -F -L SCRATCH "$WORK/scratch.img" 2>/dev/null \
-			|| bt_skip "mkfs.ext4 not available"
-		mkdir -p "$WORK/mnt" && mount -o loop "$WORK/scratch.img" "$WORK/mnt" 2>/dev/null && {
-			mkdir -p "$WORK/mnt/magicsrc"; echo "from the scratch disk" > "$WORK/mnt/magicsrc/hello"
-			umount "$WORK/mnt"; }
-		rmdir "$WORK/mnt" 2>/dev/null
-	fi
+	[ "$SCRATCH" = 1 ] && bt_scratch_disk
+}
+
+# A disk for the guest to find, so the mount options it chooses can be
+# observed.  Left dirty-free and unremarkable on purpose.
+#
+# It is *partitioned*, with the filesystem on partition 1 rather than on the
+# whole disk, because that is the only layout that exercises the initrd's
+# partition enumeration.  An earlier whole-disk version of this test passed
+# while forensic was silently leaving every partition writable: with nothing
+# to enumerate, the broken enumeration was never reached.
+bt_scratch_disk() {
+	# The partition is built as a filesystem image in its own right and then
+	# copied into place at the partition offset.  The obvious route -
+	# losetup -P on the assembled disk - needs a kernel whose loop driver
+	# scans partitions, which build containers frequently do not have, and
+	# skipping the test there would quietly turn this into no test at all.
+	mkfs.ext4 -q -F -L SCRATCH "$WORK/part1.img" 63M >/dev/null 2>&1 \
+		|| bt_skip "mkfs.ext4 not available"
+	mkdir -p "$WORK/mnt" && mount -o loop "$WORK/part1.img" "$WORK/mnt" 2>/dev/null && {
+		mkdir -p "$WORK/mnt/magicsrc"
+		echo "from the scratch disk" > "$WORK/mnt/magicsrc/hello"
+		umount "$WORK/mnt"; }
+	rmdir "$WORK/mnt" 2>/dev/null
+
+	dd if=/dev/zero of="$WORK/scratch.img" bs=1M count=64 status=none
+	# A DOS partition table written by hand: one Linux partition starting at
+	# LBA 2048 and running for 129024 sectors (63MiB).  sfdisk is not
+	# installed everywhere and this is 18 bytes.
+	printf '\000\376\377\377\203\376\377\377\000\010\000\000\000\370\001\000' \
+		| dd of="$WORK/scratch.img" bs=1 seek=446 conv=notrunc status=none
+	printf '\125\252' \
+		| dd of="$WORK/scratch.img" bs=1 seek=510 conv=notrunc status=none
+	dd if="$WORK/part1.img" of="$WORK/scratch.img" bs=512 seek=2048 \
+		conv=notrunc status=none
+	rm -f "$WORK/part1.img"
 }
 
 bt_boot() {

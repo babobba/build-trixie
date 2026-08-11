@@ -21,16 +21,19 @@ fake_sys() {
 
 run_wb() {   # $1 = cmdline
 	printf ' %s\n' "$1" > "$WORK/cmdline"
-	mkdir -p "$WORK/bin"
+	# The initrd's PATH does not include /sbin, so blockdev must be invoked by
+	# absolute path.  The stub therefore lives ONLY at a path, never on PATH:
+	# a stub on PATH would let a bare `blockdev` call resolve and hide exactly
+	# the bug that left every device writable in a real boot.
+	mkdir -p "$WORK/sbin"
 	if [ "${NO_BLOCKDEV:-}" = 1 ]; then
-		rm -f "$WORK/bin/blockdev"
+		rm -f "$WORK/sbin/blockdev"
 	else
-		printf '#!/bin/sh\necho "$@" >> %s/flagged\nexit 0\n' "$WORK" > "$WORK/bin/blockdev"
-		chmod +x "$WORK/bin/blockdev"
+		printf '#!/bin/sh\necho "$@" >> %s/flagged\nexit 0\n' "$WORK" > "$WORK/sbin/blockdev"
+		chmod +x "$WORK/sbin/blockdev"
 	fi
 	{
 		echo 'i=""'
-		echo "PATH=$WORK/bin:\$PATH"
 		echo "param() { egrep -qo \" \$1( |\\\$)\" $WORK/cmdline; }"
 		echo 'sleep() { :; }'
 		# -b is false for our stand-ins, so treat any existing file as a device
@@ -38,8 +41,8 @@ run_wb() {   # $1 = cmdline
 		extract_region '^# forensic : set the kernel read-only flag' '^# Perform filesystem check:' \
 			| sed -e "s#/sys/block#$WORK/sys/block#g" \
 			      -e "s#\[ -b /dev/\\\$PN \]#test_b $WORK/dev/\$PN#" \
-			      -e "s#blockdev --setro /dev/#blockdev --setro $WORK/dev/#" \
-			      -e "s#\[ -x /bin/blockdev \] || \[ -x /sbin/blockdev \]#[ -x $WORK/bin/blockdev ]#"
+			      -e "s#--setro /dev/#--setro $WORK/dev/#" \
+			      -e "s#for C in .*#for C in $WORK/sbin/blockdev; do#"
 	} > "$WORK/wb.sh"
 	: > "$WORK/flagged"
 	sh "$WORK/wb.sh" > "$WORK/output" 2>&1
