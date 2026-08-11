@@ -81,6 +81,38 @@ Porteus boot line that relies on the default therefore has to name its marker
 explicitly with `sgnfile=`. A marker that cannot be found is fatal rather than
 silently ignored, so a typo fails loudly instead of booting the wrong medium.
 
+## What the initrd can actually run
+
+`linuxrc` and `finit` do not run on Debian. They run inside `initrd1.xz`, on a
+busybox 1.31.1 built with a reduced applet set plus whatever `mkinitrd` copies
+in. There is no `awk`, no `dirname`, no `head`, no `expr`, no `seq`. `printf`
+and `let` are fine, but only because they are ash builtins.
+
+This matters more than it sounds, because the failure is silent. Most of
+`linuxrc` calls out from inside command substitution with stderr discarded, so
+a missing command does not stop the boot or print anything — the variable just
+comes back empty and the script carries on with a wrong value. Two live
+examples were found by looking rather than by testing:
+
+- `blockdev --setro` was applied to whole disks but never to partitions,
+  because the partition name came from `` `basename `dirname $PD`` ``. On a
+  partitioned disk — that is, on essentially every real machine — `forensic`
+  protected nothing that mattered.
+- the netboot interface probe fell back to `ls /sys/class/net | head -1`, so
+  on any machine whose first interface is not `eth0` the client's MAC could
+  not be read.
+
+Both had passing unit tests, because the unit tests run the extracted regions
+under the host's `/bin/sh`, where all of these commands exist.
+`tests/linuxrc/test_initrd_applets.sh` closes that gap by checking the source
+text against the initrd's real applet inventory. Code that `linuxrc` *writes*
+for the booted system is excluded — the `zram=` snippet's `awk` is correct,
+because it runs from `/etc/rc.local` in a full Debian userland.
+
+The rule when editing these two files: if it is not an applet in that
+inventory and not an ash builtin, use parameter expansion or `sed`, both of
+which are always there.
+
 ## Bugs fixed alongside
 
 - `nonetwork` and `bluetooth` targeted Slackware paths (`/etc/rc.d/rc.inet1`,
