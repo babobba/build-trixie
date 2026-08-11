@@ -125,7 +125,10 @@ if [ $IP ]; then BOOTDEV=network; CFGDEV=/mnt/nfs
     # falling back to the old derivation if sysfs has nothing to offer.
     MACSHORT=`ifconfig | grep eth0 | cut -d: -f5-7 | sed s/://g | cut -d" " -f1`
     NETIF=eth0
-    [ -e /sys/class/net/$NETIF/address ] || NETIF=`ls /sys/class/net 2>/dev/null | grep -v '^lo$' | head -1`
+    # sed, not head: the initrd's busybox has no head applet, so `head -1`
+    # returns nothing and NETIF ends up empty on any machine whose first
+    # interface is not called eth0.
+    [ -e /sys/class/net/$NETIF/address ] || NETIF=`ls /sys/class/net 2>/dev/null | grep -v '^lo$' | sed -n 1p`
     MAC=`cat /sys/class/net/$NETIF/address 2>/dev/null | tr -d ':' | tr a-f A-F`
     [ "$MAC" ] || MAC=$MACSHORT
     # Netbooted changes go to the NFS-exported storage directory when the user
