@@ -116,6 +116,7 @@ same reason.
 
 `mopt=ro,noatime` achieves much of `readonly` on an unmodified initrd, if you
 need it before this merges.
+
 ## What the initrd can actually run
 
 `linuxrc` and `finit` do not run on Debian. They run inside `initrd1.xz`, on a
