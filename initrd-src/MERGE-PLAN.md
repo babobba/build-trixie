@@ -156,6 +156,23 @@ Not verified end to end: that needs two machines, or two VMs on one virtual
 network, and the tests cover the generated configuration rather than a real
 client completing a netboot.
 
+### Testing it
+
+`tests/linuxrc/boot-test-pxe.sh` boots a default-config ISO with `pxe` given.
+A full end-to-end test needs a second VM on a shared virtual network, which
+this does not do; what it settles is the case almost everyone will hit first,
+which is asking for a PXE server on an image that was not built to be one.
+
+The generated script has to be written and executable, has to find the live
+directory, and then has to name every missing package and point at
+`default-pxe.conf` rather than half-starting something broken. It must exit
+non-zero without adding a line to `/etc/exports` or writing a dnsmasq config,
+and the boot must still reach the desktop — the script runs from `rc.local`
+before the graphical session, so one that hung or wrote configuration on a
+machine that cannot serve anything would be a real regression on the default
+path. Running it again with `nfspath=` set checks that the export root in the
+generated script follows the cheatcode instead of being hardcoded.
+
 ## Testing
 
 `build-trixie configs-trixie/default.conf` must still produce a bootable ISO,
