@@ -110,16 +110,17 @@ for m in ldlinux.c32 libcom32.c32 libutil.c32; do
 done
 # console=ttyS0 is ours to add here: unlike the MiniOS smoke test, this is our
 # own boot line for our own initrd, so reading the serial port is fair game.
+# One line, no continuations: isolinux has no line-continuation syntax, so a
+# trailing backslash is passed through as a literal argument and everything
+# after it is silently dropped. The first run of this test lost every cheatcode
+# that way and looked like linuxrc ignoring them.
 cat > "$WORK/iso/isolinux/isolinux.cfg" <<EOF
 DEFAULT live
 PROMPT 0
 TIMEOUT 10
 LABEL live
   KERNEL /live/vmlinuz1
-  APPEND initrd=/live/initrd1.xz console=ttyS0,115200 from=/ nomagic \\
-         login=root disable-services=cups nobluetooth \\
-         default-target=multi-user.target \\
-         cliexec=touch~/tmp/cliexec-ran;/usr/local/bin/rcli
+  APPEND initrd=/live/initrd1.xz console=ttyS0,115200 from=/ nomagic login=root disable-services=cups nobluetooth default-target=multi-user.target cliexec=touch~/tmp/cliexec-ran;/usr/local/bin/rcli
 EOF
 
 ( cd "$WORK/iso" && xorriso -as mkisofs -r -J -l \
