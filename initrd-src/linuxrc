@@ -1368,8 +1368,16 @@ debug
 # the pxe cheatcode's generated server script, copy2ram, and every changes=
 # path a user has ever written down.
 setup_shutdown_root() {
+	# The script goes in the INITRD's own root, not in /union/run/initramfs.
+	# pivot_root moves the old root onto that directory, so anything written
+	# there beforehand is hidden underneath the mount - which is exactly how
+	# this was wrong first time round: the file was written, the boot worked,
+	# and /run/initramfs/shutdown was missing in the booted system.
+	#
+	# After the pivot the initrd's / *is* /run/initramfs, so /shutdown here
+	# lands at /run/initramfs/shutdown there, which is where systemd looks.
 	mkdir -p /union/run/initramfs 2>/dev/null || return 1
-	cat > /union/run/initramfs/shutdown <<'SHUTDOWN'
+	cat > /shutdown <<'SHUTDOWN'
 #!/bin/sh
 # Run by systemd from /run/initramfs after it has left the real root, so the
 # union and the medium underneath it can be taken apart. Best effort by design:
@@ -1388,7 +1396,7 @@ case "$ACTION" in
 	*)        poweroff -f ;;
 esac
 SHUTDOWN
-	chmod +x /union/run/initramfs/shutdown 2>/dev/null
+	chmod +x /shutdown 2>/dev/null
 	return 0
 }
 
