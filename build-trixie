@@ -510,8 +510,23 @@ deb https://security.debian.org trixie-security main contrib non-free
 
 ######### Support for xlibre (replacement for xorg) #########
     if [ "$ARCH" = "amd64" ]; then  # ONLY for amd64
-curl -fsSL https://xlibre-deb.github.io/key.asc | tee /etc/apt/keyrings/xlibre-deb.asc
+curl -fsSL https://xlibre-deb.github.io/key.asc > /etc/apt/keyrings/xlibre-deb.asc
 chmod a+r /etc/apt/keyrings/xlibre-deb.asc
+# A repository whose key did not arrive is worse than no repository: apt then
+# fails on every update, in the build and afterwards in the built image, with
+# "is not signed". The fetch can fail for ordinary reasons - no network in the
+# chroot, a proxy that the chroot cannot reach - and it did so silently before
+# this check, leaving a 0-byte keyring and an unsigned entry in
+# sources.list.d.
+if [ ! -s /etc/apt/keyrings/xlibre-deb.asc ]; then
+echo -e "\e[0;31mCould not fetch the xlibre signing key - skipping that repository\033[0m"
+echo -e "\e[0;33mxlibre packages will not be available; everything else is unaffected\033[0m"
+rm -f /etc/apt/keyrings/xlibre-deb.asc
+XLIBRE_KEY_OK=""
+else
+XLIBRE_KEY_OK="yes"
+fi
+if [ "$XLIBRE_KEY_OK" ]; then
 if [ "$SYSTEMD" = "FALSE" ]; then
 echo 'Types: deb deb-src
 URIs: https://xlibre-deb.github.io/devuan/
@@ -529,6 +544,7 @@ Components: main
 Architectures: amd64
 Signed-By: /etc/apt/keyrings/xlibre-deb.asc
 ' > /etc/apt/sources.list.d/xlibre-deb.sources
+fi
 fi
     fi
 #######################################################
