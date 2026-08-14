@@ -976,7 +976,16 @@ AUTOLOGIN
 fi
 if param nologin; then
 	echo $i"disabling autologin"
-	rm -f /union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf
+	# Not just removing our own drop-in: the image ships its own
+	# getty@tty1.service with "agetty -a root" baked in, so deleting the
+	# drop-in would restore the image's autologin rather than disable it.
+	# An explicit plain getty overrides whichever unit is underneath.
+	mkdir -p /union/etc/systemd/system/getty@tty1.service.d 2>/dev/null
+	cat > /union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf <<'NOAUTOLOGIN'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --noclear %I 38400
+NOAUTOLOGIN
 	case "$DMNAME" in
 	  slim)
 		sed -i 's|^#*[ \t]*auto_login.*|auto_login          no|' /union/etc/slim.conf 2>/dev/null ;;

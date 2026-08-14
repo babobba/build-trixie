@@ -15,7 +15,12 @@ assert_not_grep "and not the previous user"    "$WORK/union/etc/systemd/system/g
 assert_grep "ExecStart is cleared before being set" "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf" '^ExecStart=$'
 
 make_fakeroot; run_cheats "quiet nologin"
-assert_no_file "nologin removes the drop-in"   "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf"
+# The image ships its own getty@tty1.service that autologs in as root, so
+# simply removing our drop-in would hand the autologin back rather than take it
+# away. nologin has to override whatever is underneath.
+assert_file "nologin still writes a drop-in"  "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf"
+assert_not_grep "with no autologin in it"     "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf" '--autologin'
+assert_grep "and a plain getty instead"       "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf" 'agetty --noclear %I'
 
 
 # With a display manager installed, build-trixie has already swapped in
