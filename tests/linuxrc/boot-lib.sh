@@ -93,7 +93,11 @@ bt_build() {
 		echo '#!/bin/sh'
 		echo 'exec > /dev/ttyS0 2>&1'
 		echo 'echo "===CLI-MARKER==="'
-		echo "$REPORT"
+		# printf, not echo: dash's echo interprets backslash escapes, so a
+		# sed or awk expression in REPORT arrives with its backslashes eaten
+		# and silently matches nothing. That cost a failing check that looked
+		# like a broken cheatcode and was a broken test.
+		printf '%s\n' "$REPORT"
 		echo 'echo "===CLI-END==="'
 	} > "$WORK/iso/live/rootcopy/usr/local/bin/rcli"
 	printf '#!/bin/sh\necho "===GUI-MARKER===" > /dev/ttyS0\n' \

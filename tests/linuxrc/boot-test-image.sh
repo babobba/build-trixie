@@ -25,7 +25,7 @@ echo "RUNMOUNT=$(awk "\$2==\"/run\"{print \$3}" /proc/mounts | head -1)"
 echo "SQFS=$(grep -c squashfs /proc/mounts)"
 echo "UNION=$(grep -c overlay /proc/mounts)"
 echo "UNITENABLED=$(test -L /etc/systemd/system/multi-user.target.wants/cliexec-cheat.service && echo YES || echo NO)"
-echo "AUTOLOGINUSER=$(sed -n "s/.*--autologin \([^ ]*\).*/\1/p" /etc/systemd/system/getty@tty1.service.d/90-autologin.conf 2>/dev/null)"
+echo "AUTOLOGINUSER=$(grep -o -- "--autologin [^ ]*" /etc/systemd/system/getty@tty1.service.d/90-autologin.conf 2>/dev/null | cut -d" " -f2)"
 echo "BTMASK=$(readlink /etc/systemd/system/bluetooth.service 2>/dev/null || echo NOTMASKED)"
 echo "SYSVINIT=$(test -x /lib/sysvinit/init && echo PRESENT || echo ABSENT)"
 '
