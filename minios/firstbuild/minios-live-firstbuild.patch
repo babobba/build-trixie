@@ -1,0 +1,155 @@
+diff --git a/linux-live/aptsources/debian.list b/linux-live/aptsources/debian.list
+index 78c1779..f46a446 100644
+--- a/linux-live/aptsources/debian.list
++++ b/linux-live/aptsources/debian.list
+@@ -1,11 +1,11 @@
+-deb http://deb.debian.org/debian/ distro main contrib non-free
+-#deb-src http://deb.debian.org/debian/ distro main contrib non-free
++deb https://deb.debian.org/debian/ distro main contrib non-free
++#deb-src https://deb.debian.org/debian/ distro main contrib non-free
+ 
+ deb http://security.debian.org/debian-security distro-security main contrib non-free
+ #deb-src http://security.debian.org/debian-security distro-security main contrib non-free
+ 
+-deb http://deb.debian.org/debian/ distro-updates main contrib non-free
+-#deb-src http://deb.debian.org/debian/ distro-updates main contrib non-free
++deb https://deb.debian.org/debian/ distro-updates main contrib non-free
++#deb-src https://deb.debian.org/debian/ distro-updates main contrib non-free
+ 
+-deb http://deb.debian.org/debian distro-backports main
+-#deb-src http://deb.debian.org/debian/ distro-backports main
+\ No newline at end of file
++deb https://deb.debian.org/debian distro-backports main
++#deb-src https://deb.debian.org/debian/ distro-backports main
+\ No newline at end of file
+diff --git a/linux-live/aptsources/trixie.list b/linux-live/aptsources/trixie.list
+index 83a5262..7c95b56 100644
+--- a/linux-live/aptsources/trixie.list
++++ b/linux-live/aptsources/trixie.list
+@@ -1,8 +1,8 @@
+-deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+-#deb-src http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
++deb https://deb.debian.org/debian trixie main contrib non-free non-free-firmware
++#deb-src https://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+ 
+-deb http://deb.debian.org/debian-security/ trixie-security main contrib non-free non-free-firmware
+-#deb-src http://deb.debian.org/debian-security/ trixie-security main contrib non-free non-free-firmware
++deb https://deb.debian.org/debian-security/ trixie-security main contrib non-free non-free-firmware
++#deb-src https://deb.debian.org/debian-security/ trixie-security main contrib non-free non-free-firmware
+ 
+-deb http://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
+-#deb-src http://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
++deb https://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
++#deb-src https://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
+diff --git a/linux-live/build.conf b/linux-live/build.conf
+index d0641b1..b9b2155 100644
+--- a/linux-live/build.conf
++++ b/linux-live/build.conf
+@@ -256,8 +256,8 @@ SNAPSHOT_DATE="20220630T090257Z"
+ CHECK_INTERNET_CONNECTION="true"
+ 
+ # Address to check for Internet connection (used if CHECK_INTERNET_CONNECTION is true)
+-CHECK_INTERNET_ADDRESS="http://deb.debian.org"
+-#CHECK_INTERNET_ADDRESS="http://archive.ubuntu.com"
++CHECK_INTERNET_ADDRESS="https://deb.debian.org"
++#CHECK_INTERNET_ADDRESS="https://archive.ubuntu.com"
+ 
+ # ──────────────────────────────────────────────────────────────────────────── #
+ #                             UBUNTU PRO SETTINGS                              #
+diff --git a/linux-live/minioslib b/linux-live/minioslib
+index 557ea96..dcd1781 100644
+--- a/linux-live/minioslib
++++ b/linux-live/minioslib
+@@ -124,7 +124,7 @@ common_variables() {
+         if [ "${BUILD_FROM_SNAPSHOT}" = "true" ]; then
+             DISTRIBUTION_URL="https://snapshot.debian.org/archive/debian/${SNAPSHOT_DATE}"
+         else
+-            DISTRIBUTION_URL="http://deb.debian.org/debian"
++            DISTRIBUTION_URL="https://deb.debian.org/debian"
+         fi
+         ;;
+     beowulf | chimaera | daedalus | excalibur)
+@@ -792,13 +792,13 @@ check_internet_connection() {
+ 
+     if [ "${VERBOSITY_LEVEL:-0}" -ge 1 ]; then
+         information "Checking internet connection..."
+-        information "Connecting to ${CHECK_INTERNET_ADDRESS:-http://deb.debian.org} to verify connectivity."
++        information "Connecting to ${CHECK_INTERNET_ADDRESS:-https://deb.debian.org} to verify connectivity."
+     fi
+ 
+     if command -v wget >/dev/null; then
+-        wget -q --spider --timeout=5 "${CHECK_INTERNET_ADDRESS:-http://deb.debian.org}"
++        wget -q --spider --timeout=5 "${CHECK_INTERNET_ADDRESS:-https://deb.debian.org}"
+     elif command -v curl >/dev/null; then
+-        curl --silent --head --max-time 5 "${CHECK_INTERNET_ADDRESS:-http://deb.debian.org}"
++        curl --silent --head --max-time 5 "${CHECK_INTERNET_ADDRESS:-https://deb.debian.org}"
+     else
+         error "Neither wget nor curl is available on this system."
+         exit 1
+@@ -1727,7 +1727,7 @@ build_chroot() {
+         cache_cp "etc/apt/sources.list"
+ 
+         if ! cache_restore "etc/apt/trusted.gpg.d/minios-linux.gpg"; then
+-            curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 -k http://deb.minios.dev/minios-linux.asc |
++            curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 -k https://deb.minios.dev/minios-linux.asc |
+                 gpg --dearmor >"${INSTALL_DIR}/etc/apt/trusted.gpg.d/minios-linux.gpg"
+             cache_cp "etc/apt/trusted.gpg.d/minios-linux.gpg"
+         fi
+@@ -1757,18 +1757,18 @@ EOF
+         # Add MiniOS Linux repository
+         {
+             [[ "${MINIOS_REPO_DISTRIBUTION}" =~ ^(buster|bookworm|trixie|sid)$ ]] && cat <<EOF
+-deb http://deb.minios.dev/debian/ ${MINIOS_REPO_DISTRIBUTION} main contrib non-free
+-#deb-src http://deb.minios.dev/debian/ ${MINIOS_REPO_DISTRIBUTION} main contrib non-free
++deb https://deb.minios.dev/debian/ ${MINIOS_REPO_DISTRIBUTION} main contrib non-free
++#deb-src https://deb.minios.dev/debian/ ${MINIOS_REPO_DISTRIBUTION} main contrib non-free
+ 
+ EOF
+             [[ "${MINIOS_REPO_DISTRIBUTION}" =~ ^(bionic|focal|jammy|noble)$ ]] && cat <<EOF
+-deb http://deb.minios.dev/debian/ ${MINIOS_REPO_DISTRIBUTION} main contrib non-free
+-#deb-src http://deb.minios.dev/debian/ ${MINIOS_REPO_DISTRIBUTION} main contrib non-free
++deb https://deb.minios.dev/debian/ ${MINIOS_REPO_DISTRIBUTION} main contrib non-free
++#deb-src https://deb.minios.dev/debian/ ${MINIOS_REPO_DISTRIBUTION} main contrib non-free
+ 
+ EOF
+             cat <<EOF
+-deb http://deb.minios.dev/debian/ generic main contrib non-free
+-#deb-src http://deb.minios.dev/debian/ generic main contrib non-free
++deb https://deb.minios.dev/debian/ generic main contrib non-free
++#deb-src https://deb.minios.dev/debian/ generic main contrib non-free
+ EOF
+ 
+         } >"${INSTALL_DIR}/etc/apt/sources.list.d/minios-linux.list"
+diff --git a/linux-live/scripts/01-kernel/packages.list b/linux-live/scripts/01-kernel/packages.list
+index bfa395c..ca02d4f 100644
+--- a/linux-live/scripts/01-kernel/packages.list
++++ b/linux-live/scripts/01-kernel/packages.list
+@@ -12,10 +12,10 @@ broadcom-sta-dkms -d=jammy -ka=true -da=i386
+ aufs-dkms +dp=debian +d=buster +d=beowulf
+ zfs-dkms +pv=toolbox +pv=ultra +da=amd64
+ realtek-rtl8723cs-dkms -d=trixie -d=excalibur -d=sid -d=buster -d=beowulf -d=bullseye -d=chimaera -d=bionic -d=focal -d=jammy -d=noble -d=resolute
+-realtek-rtl8821au-dkms
++realtek-rtl8821au-dkms -d=trixie
+ realtek-rtl8821cu-dkms -d=trixie -d=excalibur -d=sid
+-realtek-rtl88xxau-dkms
+-realtek-rtl8188eus-dkms
+-realtek-rtl8814au-dkms
++realtek-rtl88xxau-dkms -d=trixie
++realtek-rtl8188eus-dkms -d=trixie
++realtek-rtl8814au-dkms -d=trixie
+ realtek-rtl8821ce-dkms -d=trixie -d=excalibur -d=sid
+ realtek-rtl88x2bu-dkms -d=bookworm -d=daedalus -d=trixie -d=excalibur -d=sid
+diff --git a/linux-live/scripts/02-firmware/packages.list b/linux-live/scripts/02-firmware/packages.list
+index 774dd0e..d769227 100644
+--- a/linux-live/scripts/02-firmware/packages.list
++++ b/linux-live/scripts/02-firmware/packages.list
+@@ -12,7 +12,8 @@ firmware-cavium -dp=ubuntu
+ firmware-ipw2x00 -dp=ubuntu
+ firmware-libertas -dp=ubuntu
+ firmware-ti-connectivity -dp=ubuntu
+-firmware-b43-installer -d=bionic -dp=ubuntu
++# removed for this build: postinst downloads over the network
++#firmware-b43-installer -d=bionic -dp=ubuntu
+ firmware-sof-signed -da=i386 -dp=ubuntu -{pv=minimum&de=xfce}
+ 
+ # Ubuntu firmware packages
