@@ -76,6 +76,53 @@ sed -i 's|http://deb.minios.dev|https://deb.minios.dev|g' "$SRC/linux-live/minio
 sed -i 's|CHECK_INTERNET_ADDRESS="http://|CHECK_INTERNET_ADDRESS="https://|' \
 	"$SRC/linux-live/build.conf"
 
+# ------------------------------------------------ drivers that no longer build
+# The one deviation from the shipped configuration, and the only change that
+# affects what gets installed.
+#
+# Four out-of-tree Realtek wifi drivers do not compile against trixie's 6.12
+# kernel: cfg80211's set_monitor_channel gained a struct net_device * parameter,
+# the drivers were never updated, and GCC 14 makes an incompatible
+# function-pointer assignment an error rather than a warning. dpkg then fails to
+# configure them and the build stops without producing an ISO.
+#
+# This is upstream's own idiom applied to packages it had not caught up with:
+# five sibling realtek drivers in the same file already carry -d=trixie.
+#
+# Not KERNEL_BUILD_DKMS="false" - these entries have no +kbd= condition, so that
+# variable gates only whether kernel headers are installed, not these packages.
+echo "== excluding realtek drivers that do not build on trixie"
+PKGLIST="$SRC/linux-live/environments/xfce/01-kernel/packages.list"
+for d in realtek-rtl8821au-dkms realtek-rtl88xxau-dkms \
+         realtek-rtl8188eus-dkms realtek-rtl8814au-dkms; do
+	sed -i "s|^${d}\$|${d} -d=trixie|" "$PKGLIST"
+done
+grep -E '^realtek' "$PKGLIST" | sed 's/^/   /'
+
+# ------------------------------- a package that cannot download behind a proxy
+# Different in kind from the exclusion above, and worth keeping separate.
+#
+# firmware-b43-installer does not ship firmware; its postinst downloads a
+# tarball from github.com. Behind this proxy, wget inside the chroot reports
+#
+#     ERROR: The certificate of 'github.com' is not trusted.
+#
+# because the chroot's trust store has no copy of the proxy's CA. That is
+# purely local: on a host with direct internet the package installs normally,
+# and nothing about MiniOS is wrong.
+#
+# Excluded rather than fixed by installing the proxy CA into the chroot,
+# because that CA would then be baked into the 00-core module and ship inside
+# the ISO - a MITM certificate trusted by every machine that boots it. Not a
+# trade worth making to obtain firmware for Broadcom b43 wifi chips that a
+# virtual machine does not have.
+if [ -n "${https_proxy:-}${HTTPS_PROXY:-}" ]; then
+	echo "== excluding firmware-b43-installer (downloads at install time)"
+	FWLIST="$SRC/linux-live/environments/xfce/02-firmware/packages.list"
+	sed -i 's|^firmware-b43-installer .*|# removed for this build: postinst downloads over the network\n#\0|' "$FWLIST"
+	grep -n "b43" "$FWLIST" | sed 's/^/   /'
+fi
+
 # build.conf is otherwise untouched. Show what is about to be built so a change
 # in upstream defaults is visible in the log rather than silent.
 echo "== building with upstream defaults:"

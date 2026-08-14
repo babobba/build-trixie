@@ -84,6 +84,71 @@ CONNECT** — plain `http://` returns 403.
    build cannot produce MiniOS without them, and the key fetch uses
    `curl --fail`, so it stops rather than degrading.
 
+### One upstream defect, not an environment problem
+
+The stock build **does not complete** on trixie. Four out-of-tree Realtek
+wireless drivers fail to compile against Debian trixie's 6.12 kernel:
+
+    realtek-rtl8821au-dkms  realtek-rtl88xxau-dkms
+    realtek-rtl8188eus-dkms realtek-rtl8814au-dkms
+
+The first error is representative:
+
+    ioctl_cfg80211.c:10523:32: error: initialization of
+    'int (*)(struct wiphy *, struct net_device *, struct cfg80211_chan_def *)'
+    from incompatible pointer type
+    'int (*)(struct wiphy *, struct cfg80211_chan_def *)'
+    [-Wincompatible-pointer-types]
+
+cfg80211's `set_monitor_channel` gained a `struct net_device *` parameter, the
+drivers were never updated, and GCC 14 treats an incompatible function-pointer
+assignment as an error rather than a warning. dpkg then fails to configure
+those four packages plus `linux-headers-*`, and the build stops before
+producing an ISO.
+
+This is upstream's, not ours. It has nothing to do with the proxy, and the
+same source would fail on any trixie host. It also looks like an oversight
+rather than a decision: `linux-live/environments/xfce/01-kernel/packages.list`
+already excludes five sibling drivers from trixie —
+
+    realtek-rtl8723cs-dkms  -d=trixie ...
+    realtek-rtl8821cu-dkms  -d=trixie -d=excalibur -d=sid
+    realtek-rtl8821ce-dkms  -d=trixie -d=excalibur -d=sid
+    realtek-rtl88x2bu-dkms  -d=bookworm -d=daedalus -d=trixie ...
+
+— so the mechanism for skipping a driver that no longer builds is already in
+use, three lines above the four that were missed.
+
+`build-minios` therefore adds `-d=trixie` to those four, which is upstream's
+own idiom applied to the packages it had not caught up with yet. **That is a
+deviation from the shipped configuration**, and the only one that changes what
+gets installed. Everything the resulting image does is otherwise stock; the
+drivers in question are for USB Realtek wifi adapters, which a virtual machine
+does not have.
+
+`KERNEL_BUILD_DKMS="false"` looks like the tidier switch but is not: the
+realtek entries carry no `+kbd=` condition, so that variable only gates whether
+kernel headers get installed, not whether these packages do.
+
+### And one that is purely local
+
+`firmware-b43-installer` does not ship firmware — its postinst downloads a
+tarball from `github.com`. Behind this proxy, `wget` inside the chroot fails
+with
+
+    ERROR: The certificate of 'github.com' is not trusted.
+
+because the chroot's trust store has no copy of the proxy's CA. Unlike the
+Realtek failure this says nothing about MiniOS; on a host with direct internet
+the package installs normally.
+
+`build-minios` excludes it, and only when a proxy is configured. The
+alternative — installing the proxy CA into the chroot — was rejected on
+purpose: the CA would be baked into the `00-core` module and ship inside the
+ISO, leaving a MITM certificate trusted by every machine that boots it. That is
+not a reasonable price for firmware for Broadcom b43 chips that a virtual
+machine does not have.
+
 ## Checking that it runs
 
     ./tests/minios/boot-test-minios.sh
