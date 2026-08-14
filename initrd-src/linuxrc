@@ -1376,6 +1376,19 @@ setup_shutdown_root() {
 	#
 	# After the pivot the initrd's / *is* /run/initramfs, so /shutdown here
 	# lands at /run/initramfs/shutdown there, which is where systemd looks.
+	# /run must be a mountpoint before the pivot, not merely a directory.
+	#
+	# systemd mounts a tmpfs on /run early in boot unless one is already there.
+	# If we pivot the old root onto a plain directory in the overlay, that
+	# tmpfs goes over the top and /run/initramfs - the old root, with the
+	# shutdown script in it - disappears from the running system. The boot
+	# still works, which is what makes this quiet: everything is fine until
+	# the machine is switched off and the union cannot be unmounted.
+	#
+	# Mounting the tmpfs ourselves and pivoting into a directory inside it is
+	# what LiveKit does, and it is the reason its shutdown script survives.
+	mkdir -p /union/run 2>/dev/null
+	mount -t tmpfs tmpfs /union/run 2>/dev/null
 	mkdir -p /union/run/initramfs 2>/dev/null || return 1
 	cat > /shutdown <<'SHUTDOWN'
 #!/bin/sh
@@ -1420,7 +1433,6 @@ done
 
 if [ "$INIT_OVERRIDE" ] && [ "$INIT_OVERRIDE" != "/bin/systemd" ]; then
 	echo -e "${YELLOW}init=$INIT_OVERRIDE given - starting that instead of systemd${RST}"
-	mkdir -p /union/run/initramfs
 	setup_shutdown_root
 	pivot_root /union /union/run/initramfs
 	rm -rf mnt/live 2>/dev/null; mkdir -p mnt 2>/dev/null
@@ -1438,7 +1450,6 @@ if [ -z "$SDBIN" ]; then
 else
 	cp -f "$SDBIN" /bin/systemd
 	if [ $? -eq 0 ]; then
-		mkdir -p /union/run/initramfs
 		setup_shutdown_root
 		echo -e "${BOLD}using systemd...${RST}"
 		# /run/initramfs, not /mnt/live: at shutdown systemd re-execs into

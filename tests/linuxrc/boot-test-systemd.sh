@@ -89,6 +89,11 @@ echo "INIT=$(ps -p 1 -o comm=)"
 echo "OSID=$(. /etc/os-release; echo $ID-$VERSION_ID)"
 echo "SHUTDOWN=$(test -x /run/initramfs/shutdown && echo PRESENT || echo MISSING)"
 echo "MNTLIVE=$(readlink /mnt/live 2>/dev/null || echo NOTALINK)"
+# readlink only reads the link text; it says nothing about the target being
+# there. /run is a mountpoint in its own right when the pivot was done right,
+# and empty when systemd's tmpfs went over the top of it.
+echo "INITRAMFSN=$(ls /run/initramfs 2>/dev/null | wc -l)"
+echo "RUNMOUNT=$(awk '$2=="/run"{print $3}' /proc/mounts | head -1)"
 echo "SQFS=$(grep -c squashfs /proc/mounts)"
 echo "UNION=$(grep -c overlay /proc/mounts)"
 echo "XORG=$(pgrep -c -x Xorg 2>/dev/null || true)"
@@ -169,8 +174,16 @@ case "$(get OSID)" in debian-13*) _pass "the rootfs is Debian 13 trixie" ;;
 # stand while unmounting the union at shutdown.
 [ "$(get SHUTDOWN)" = PRESENT ] && _pass "the shutdown handler is at /run/initramfs" \
 	|| _fail "the shutdown handler is at /run/initramfs" "got '$(get SHUTDOWN)'"
-[ "$(get MNTLIVE)" = /run/initramfs ] && _pass "/mnt/live still resolves, for everything that refers to it" \
-	|| _fail "/mnt/live still resolves" "got '$(get MNTLIVE)'"
+[ "$(get MNTLIVE)" = /run/initramfs ] && _pass "/mnt/live points at the pivoted root" \
+	|| _fail "/mnt/live points at the pivoted root" "got '$(get MNTLIVE)'"
+# The symlink above can be right while the target is empty, which is exactly
+# what happened when systemd's tmpfs was allowed over /run. This is the check
+# that /mnt/live leads somewhere.
+[ "$(get INITRAMFSN)" -gt 0 ] 2>/dev/null \
+	&& _pass "and the old root is really there ($(get INITRAMFSN) entries)" \
+	|| _fail "the old root is really there" "/run/initramfs is empty"
+[ -n "$(get RUNMOUNT)" ] && _pass "/run is a mountpoint, so systemd left it alone ($(get RUNMOUNT))" \
+	|| _fail "/run is a mountpoint" "nothing mounted on /run"
 
 echo "-- the union our linuxrc assembled"
 [ "$(get SQFS)" -gt 0 ] 2>/dev/null && _pass "squashfs modules are mounted ($(get SQFS))" \
