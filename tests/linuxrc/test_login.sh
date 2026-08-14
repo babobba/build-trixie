@@ -1,18 +1,25 @@
 #!/bin/sh
-# login= / nologin : the tty1 autologin line in /etc/inittab
+# login= / nologin : the tty1 autologin, now a getty@tty1 drop-in.
+#
+# It used to be a line in /etc/inittab. On systemd there is no inittab, and the
+# supported way to change a packaged unit's command is a drop-in under
+# /etc/systemd/system/<unit>.d/ - so that is what these assert on.
 . "$(dirname "$0")/lib.sh"
 
 make_fakeroot; run_cheats "quiet login=puppy"
-assert_grep "login= sets the autologin user"   "$WORK/union/etc/inittab" 'login -f puppy'
-assert_not_grep "root autologin is replaced"   "$WORK/union/etc/inittab" 'login -f root'
-assert_grep "other inittab lines survive"      "$WORK/union/etc/inittab" 'getty 38400 tty2'
+assert_file "login= writes a getty drop-in"    "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf"
+assert_grep "it autologs in the named user"   "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf" '--autologin puppy'
+assert_not_grep "and not the previous user"    "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf" '--autologin root'
+# Without the empty ExecStart= first, systemd appends to the packaged command
+# instead of replacing it and the unit refuses to start.
+assert_grep "ExecStart is cleared before being set" "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf" '^ExecStart=$'
 
 make_fakeroot; run_cheats "quiet nologin"
-assert_grep "nologin puts getty on tty1"       "$WORK/union/etc/inittab" '^1:2345:respawn:/sbin/getty 38400 tty1'
-assert_not_grep "nologin removes autologin"    "$WORK/union/etc/inittab" 'login -f'
+assert_no_file "nologin removes the drop-in"   "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf"
+
 
 # With a display manager installed, build-trixie has already swapped in
-# inittab-noauto, so inittab alone decides nothing -- the display manager has
+# a display manager, so the tty drop-in alone decides nothing -- the display manager has
 # to be configured too.
 with_dm() {   # $1 = display manager binary path, $2.. = extra setup
 	make_fakeroot
@@ -59,7 +66,7 @@ assert_grep "nologin disables gdm3 autologin" "$WORK/union/etc/gdm3/daemon.conf"
 echo "-- an unknown display manager says so instead of failing silently"
 with_dm /usr/bin/entrance; run_cheats "quiet login=puppy"
 assert_grep "the user is warned"             "$WORK/output" 'display manager entrance is not known'
-assert_grep "inittab is still updated"       "$WORK/union/etc/inittab" 'login -f puppy'
+assert_grep "the tty autologin is still set" "$WORK/union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf" '--autologin puppy'
 
 echo "-- no display manager: nothing extra is written"
 make_fakeroot; run_cheats "quiet login=puppy"

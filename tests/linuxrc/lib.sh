@@ -34,6 +34,14 @@ extract_cheat_block() {
 	extract_region '^CHEATRC=/tmp/cheatrc' '^cp -af /dev/console' | grep -v '^####'
 }
 
+# The sd_* helpers that write systemd symlinks and drop-ins. They are defined
+# earlier in linuxrc than the cheatcode block, so lifting the block alone leaves
+# them undefined and every enable/mask silently does nothing - the tests then
+# pass or fail for the wrong reason. Pulled out separately and prepended.
+extract_sd_helpers() {
+	extract_region '^# systemd is the target on this branch' '^CHEATRC=/tmp/cheatrc'
+}
+
 # extract_func FILE NAME -- print a shell function definition by name.
 extract_func() {
 	awk -v n="$2" '
@@ -73,6 +81,36 @@ make_fakeroot() {
 	# /etc/profile starts X on tty1, exactly as the built image does
 	printf 'export PATH\n\nif [ -z "${DISPLAY}" ] && [ $(tty) = /dev/tty1 ]\nthen\nsleep 3\nstartx\nfi\n' \
 		> "$WORK/union/etc/profile"
+	make_fake_systemd
+}
+
+# The systemd side of the fake root. linuxrc now writes units and symlinks
+# rather than editing inittab and rc.local, so the fixture has to look enough
+# like a systemd system for that to be meaningful: the binary whose presence is
+# the detection test, a unit directory with the units the cheatcodes touch, and
+# an empty /etc/systemd/system for the drop-ins and symlinks to land in.
+make_fake_systemd() {
+	mkdir -p "$WORK/union/lib/systemd/system" "$WORK/union/etc/systemd/system" \
+	         "$WORK/union/usr/local/bin"
+	printf '#!/bin/sh\n' > "$WORK/union/lib/systemd/systemd"
+	chmod +x "$WORK/union/lib/systemd/systemd"
+	for u in getty@.service bluetooth.service NetworkManager.service \
+	         networking.service systemd-networkd.service wpa_supplicant.service \
+	         dhcpcd.service connman.service systemd-timesyncd.service \
+	         ssh.service cups.service display-manager.service; do
+		printf '[Unit]\nDescription=fake %s\n[Service]\nExecStart=/bin/true\n' "$u" \
+			> "$WORK/union/lib/systemd/system/$u"
+	done
+	for t in multi-user.target graphical.target rescue.target; do
+		printf '[Unit]\nDescription=fake %s\n' "$t" \
+			> "$WORK/union/lib/systemd/system/$t"
+	done
+}
+
+# A union with no systemd at all, for asserting that the absence is reported
+# rather than silently producing a system nothing configured.
+unmake_fake_systemd() {
+	rm -f "$WORK/union/lib/systemd/systemd" "$WORK/union/usr/lib/systemd/systemd"
 }
 
 # ------------------------------------------------------------------- running
@@ -84,7 +122,12 @@ run_cheats() {
 		echo 'i=""'
 		echo "param() { egrep -qo \" \$1( |\\\$)\" $WORK/cmdline; }"
 		echo "value() { egrep -o \" \$1=[^ ]+\" $WORK/cmdline | cut -d= -f2; }"
-		extract_cheat_block \
+		# Both halves go through the same rewrite. The helpers write to
+		# /union just as the cheatcode block does, so leaving them out of the
+		# sed pointed every symlink at the real root - where the mkdir failed
+		# and the ln silently did nothing, which looked like a bug in the
+		# cheatcode rather than in the harness.
+		{ extract_sd_helpers; extract_cheat_block; } \
 			| sed -e "s#/union#$WORK/union#g" \
 			      -e "s#/tmp/cheatrc#$WORK/tmp/cheatrc#g" \
 			      -e "s#/tmp/rc.local.new#$WORK/tmp/rc.local.new#g"

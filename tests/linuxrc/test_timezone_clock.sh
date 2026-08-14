@@ -17,9 +17,14 @@ make_fakeroot; run_cheats "quiet timezone=Europe/Amsterdam"
 assert_no_file "adjtime not written without utc" "$WORK/union/etc/adjtime"
 
 make_fakeroot; run_cheats "quiet noupdateclock"
-assert_not_executable "noupdateclock disables hwclock.sh" "$WORK/union/etc/init.d/hwclock.sh"
+# systemd has no hwclock.sh. The RTC is written by timesyncd on a good sync, so
+# masking that unit is the equivalent - and masking, not disabling, because a
+# disabled unit can still be pulled in as another unit's dependency.
+assert_symlink "noupdateclock masks timesyncd" \
+	"$WORK/union/etc/systemd/system/systemd-timesyncd.service" /dev/null
 
 make_fakeroot; run_cheats "quiet"
-assert_executable "hwclock.sh untouched by default" "$WORK/union/etc/init.d/hwclock.sh"
+assert_no_file "timesyncd untouched by default" \
+	"$WORK/union/etc/systemd/system/systemd-timesyncd.service"
 
 finish

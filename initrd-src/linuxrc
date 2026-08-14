@@ -792,17 +792,75 @@ let y=x+20
 #x=`losetup | tail -n1 | cut -d: -f1 | sed 's@/dev/loop@@'`; let y=x+20
 while [ $x -le $y ]; do [ -b /dev/loop$y ] && break || mknod /dev/loop$y b 7 $y; chmod g+rw-x,o-rwx /dev/loop$y; let y=y-1; done
 
+# systemd is the target on this branch.
+#
+# The Porteus lineage grew up on sysvinit and several cheatcodes used to be
+# written in its terms - login= edited /etc/inittab, cliexec= hung off
+# /etc/rc.local, nonetwork and friends chmod -x'd an init script. None of that
+# does anything on a systemd system: there is no inittab to edit, /etc/rc.local
+# is read only if rc-local.service happens to be shipped and its condition
+# passes, and unit files are not shell scripts you can take the +x off.
+#
+# Those paths are gone rather than kept alongside. A cheatcode that silently
+# writes a file nothing reads is worse than one that is absent, because it
+# reports success.
+if [ -x /union/lib/systemd/systemd ] || [ -x /union/usr/lib/systemd/systemd ]; then
+	:
+else
+	echo -e "${RED}no systemd in the union - this initrd targets systemd only${RST}"
+	echo -e "${YELLOW}the boot will continue, but the cheatcodes below will not apply${RST}"
+	sleep 5
+fi
+
+# Where a unit lives, so it can be enabled or masked without systemctl running.
+# /etc/systemd/system always wins over /lib and /usr/lib, which is what makes
+# offline configuration possible at all: a symlink placed there is exactly what
+# `systemctl enable` and `systemctl mask` would have created.
+sd_unit_path() {   # UNIT -> prints the shipped unit file, or nothing
+	for d in /union/lib/systemd/system /union/usr/lib/systemd/system \
+	         /union/etc/systemd/system; do
+		[ -f "$d/$1" ] && { echo "${d#/union}/$1"; return 0; }
+	done
+	return 1
+}
+
+sd_mask() {        # UNIT - stop it starting, the way `systemctl mask` does
+	mkdir -p /union/etc/systemd/system 2>/dev/null
+	ln -sf /dev/null "/union/etc/systemd/system/$1" 2>/dev/null
+}
+
+sd_unmask() {      # UNIT
+	[ -L "/union/etc/systemd/system/$1" ] && rm -f "/union/etc/systemd/system/$1"
+}
+
+sd_enable() {      # UNIT [TARGET] - what `systemctl enable` writes
+	U=$1; T=${2:-multi-user.target}
+	P=`sd_unit_path "$U"` || return 1
+	mkdir -p "/union/etc/systemd/system/$T.wants" 2>/dev/null
+	ln -sf "$P" "/union/etc/systemd/system/$T.wants/$U" 2>/dev/null
+}
+
+sd_disable() {     # UNIT - remove the enable symlinks, leaving it startable
+	rm -f /union/etc/systemd/system/*.target.wants/"$1" 2>/dev/null
+}
+
 if param nonetwork; then
     echo $i"disabling dhcpcd and NetworkManager services"
-    chmod -x /union/etc/rc.d/rc.inet1 /union/etc/rc.d/rc.networkmanager 2>/dev/null
-    # Debian/Devuan equivalents (the rc.d names above are Slackware's)
-    chmod -x /union/etc/init.d/networking /union/etc/init.d/network-manager 2>/dev/null
-    chmod -x /union/etc/rc.d/rc.network 2>/dev/null
+    # Masking, not disabling: NetworkManager is pulled in by other units, so
+    # merely removing the enable symlink would leave it started on demand.
+    for u in NetworkManager.service networking.service systemd-networkd.service \
+             wpa_supplicant.service dhcpcd.service connman.service; do
+	sd_mask $u
+    done
     nma=/union/etc/xdg/autostart/nm-applet.desktop
     test -e $nma && ! grep -q "Hidden=true" $nma && echo "Hidden=true" >> $nma
 fi
 
-if [ "$IP" -a -x /union/etc/rc.d/rc.networkmanager ]; then
+# The guard used to be Slackware's rc.networkmanager. What actually matters is
+# that NetworkManager is present at all: if it is, and the client netbooted, the
+# NIC that carries the root filesystem must be left alone or NM will renegotiate
+# it out from under the running system.
+if [ "$IP" ] && [ -f /union/etc/NetworkManager/NetworkManager.conf ]; then
     if [ -z "`egrep -o "copy2ram( |\$)" /proc/cmdline`" -o -d /mnt/nfs/storage/client-$MAC ]; then
 #    if [ -z "`egrep -o "^copy2ram" /union/etc/bootcmd.cfg`" -o -d /mnt/nfs/storage/client-$MAC ]; then
 	echo "nameserver $IP" > /union/etc/resolv.conf
@@ -818,15 +876,15 @@ fi
 # Start bluetooth if cheat exists
 if param bluetooth; then
 	echo "Starting bluetooth ..."
-	[ -e /union/etc/rc.d/rc.bluetooth ] && chmod +x /union/etc/rc.d/rc.bluetooth
-	[ -e /union/etc/init.d/bluetooth ] && chmod +x /union/etc/init.d/bluetooth
+	sd_unmask bluetooth.service
+	sd_enable bluetooth.service
 fi
 
 # nobluetooth (PorteuX): Debian starts bluetooth by default, so this is the
 # useful direction of the switch.
 if param nobluetooth; then
 	echo $i"disabling bluetooth"
-	chmod -x /union/etc/init.d/bluetooth /union/etc/rc.d/rc.bluetooth 2>/dev/null
+	sd_mask bluetooth.service
 fi
 
 ################################################################################
@@ -869,20 +927,29 @@ fi
 # noupdateclock (PorteuX) : never write the hardware clock at boot/shutdown
 if param noupdateclock; then
 	echo $i"disabling hardware clock updates"
-	chmod -x /union/etc/init.d/hwclock.sh 2>/dev/null
+	# systemd has no hwclock.sh. The RTC is written by timesyncd on a good
+	# sync and by systemd itself at shutdown; masking timesyncd stops the first.
+	sd_mask systemd-timesyncd.service
 fi
 
 # login=user / nologin : autologin.
-# Without a display manager this is the tty1 line in /etc/inittab.  With one,
-# build-trixie has already swapped in inittab-noauto and login goes through the
-# display manager, so touching inittab alone would do nothing visible - the
-# display manager has to be configured as well.  Drop-in files are used where
-# the display manager supports them, so its packaged config is left alone.
+# Two places, because either can be the one that matters: getty@tty1 for a
+# text login, and the display manager for a graphical one. Drop-in files are
+# used wherever supported, so packaged configuration is left alone.
 DMNAME=`cat /union/etc/X11/default-display-manager 2>/dev/null`; DMNAME=${DMNAME##*/}
 LOGINUSER=`value login`
 if [ "$LOGINUSER" ]; then
 	echo $i"autologin as $LOGINUSER"
-	sed -i 's|/bin/login -f [A-Za-z0-9_.-]*|/bin/login -f '"$LOGINUSER"'|' /union/etc/inittab
+	# The tty1 login is getty@tty1.service, and the supported way to change its
+	# command line is a drop-in. The empty ExecStart= first is required:
+	# without it systemd appends to the packaged one instead of replacing it,
+	# and the unit fails to start with two ExecStart lines.
+	mkdir -p /union/etc/systemd/system/getty@tty1.service.d 2>/dev/null
+	cat > /union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf <<AUTOLOGIN
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $LOGINUSER --noclear %I \$TERM
+AUTOLOGIN
 	case "$DMNAME" in
 	  slim)
 		sed -i -e 's|^#*[ \t]*default_user.*|default_user        '"$LOGINUSER"'|' \
@@ -904,12 +971,12 @@ if [ "$LOGINUSER" ]; then
 		printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=%s\n' "$LOGINUSER" \
 			> /union/etc/gdm3/daemon.conf ;;
 	  "") ;;
-	  *) echo $i"login= : display manager $DMNAME is not known here - only /etc/inittab was changed" ;;
+	  *) echo $i"login= : display manager $DMNAME is not known here - only the tty autologin was set" ;;
 	esac
 fi
 if param nologin; then
 	echo $i"disabling autologin"
-	sed -i 's|^\(1:[0-9]*:respawn:\)/bin/login -f .*|\1/sbin/getty 38400 tty1|' /union/etc/inittab
+	rm -f /union/etc/systemd/system/getty@tty1.service.d/90-autologin.conf
 	case "$DMNAME" in
 	  slim)
 		sed -i 's|^#*[ \t]*auto_login.*|auto_login          no|' /union/etc/slim.conf 2>/dev/null ;;
@@ -923,7 +990,7 @@ if param nologin; then
 		mkdir -p /union/etc/gdm3 2>/dev/null
 		printf '[daemon]\nAutomaticLoginEnable=false\n' > /union/etc/gdm3/daemon.conf ;;
 	  "") ;;
-	  *) echo $i"nologin : display manager $DMNAME is not known here - only /etc/inittab was changed" ;;
+	  *) echo $i"nologin : display manager $DMNAME is not known here - only the tty autologin was removed" ;;
 	esac
 fi
 
@@ -1040,10 +1107,11 @@ dhcp-range=$SRVIP,proxy
 pxe-service=x86PC,"DebianDog live",pxelinux
 CFG
 
-[ -x /etc/init.d/rpcbind ] && /etc/init.d/rpcbind start >/dev/null 2>&1
-[ -x /etc/init.d/nfs-kernel-server ] && /etc/init.d/nfs-kernel-server start >/dev/null 2>&1
+# This runs in the booted system, where systemd is PID 1.
+systemctl start rpcbind.service >/dev/null 2>&1
+systemctl start nfs-kernel-server.service >/dev/null 2>&1
 exportfs -ra 2>/dev/null
-[ -x /etc/init.d/dnsmasq ] && /etc/init.d/dnsmasq restart >/dev/null 2>&1
+systemctl restart dnsmasq.service >/dev/null 2>&1
 echo "pxe: serving $PXEROOT from $SRVIP (proxy DHCP, TFTP, NFS)"
 exit 0
 PXEBODY
@@ -1051,19 +1119,11 @@ PXEBODY
 	echo "/usr/local/bin/pxe-server || true" >> $CHEATRC
 fi
 
-# Everything collected above goes into one script, run before the graphical
-# session starts.  It is called from two places because neither is sufficient:
-#
-#   - /etc/rc.local, which is where this kind of thing belongs, but runs as
-#     S03 in the multiuser runlevel while inittab starts the tty1 autologin at
-#     the same time, so startx can win the race;
-#   - /etc/profile, immediately before its startx call, which is ordered by
-#     construction but only covers the tty1 login path.
-#
-# The script takes a boot-scoped lock with mkdir, which is atomic, so whichever
-# gets there first runs the commands and the other returns immediately.  That
-# is what makes this the runlevel-3 equivalent Porteus documents: the commands
-# have always run by the time X starts.
+# Everything collected above goes into one script, started by a unit ordered
+# before the graphical session. That ordering is the whole content of the
+# cheatcode - Porteus documents cliexec= as "runlevel 3", i.e. before X - and a
+# unit states it directly instead of racing rc.local against the tty1 login the
+# way the sysvinit version had to.
 if [ -s $CHEATRC ]; then
 	mkdir -p /union/usr/local/bin 2>/dev/null
 	CX=/union/usr/local/bin/cliexec-cheat
@@ -1077,18 +1137,73 @@ CXHEAD
 	echo "exit 0" >> $CX
 	chmod +x $CX
 
-	RCL=/union/etc/rc.local
-	[ -f $RCL ] || printf '#!/bin/sh -e\n\nexit 0\n' > $RCL
-	grep -v '^exit 0' $RCL > /tmp/rc.local.new
-	echo "" >> /tmp/rc.local.new
-	echo "# added by initrd cheatcodes" >> /tmp/rc.local.new
-	echo "/usr/local/bin/cliexec-cheat || true" >> /tmp/rc.local.new
-	echo "exit 0" >> /tmp/rc.local.new
-	cat /tmp/rc.local.new > $RCL
-	chmod +x $RCL
+	mkdir -p /union/etc/systemd/system 2>/dev/null
+	cat > /union/etc/systemd/system/cliexec-cheat.service <<'CXUNIT'
+[Unit]
+Description=Commands from the cliexec= cheatcode
+Documentation=man:bootparam(7)
+# Before the graphical session, which is what cliexec= promises.
+Before=display-manager.service graphical.target
+After=local-fs.target
 
-	sed -i 's|^startx$|/usr/local/bin/cliexec-cheat; startx|' /union/etc/profile 2>/dev/null
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/cliexec-cheat
+# A bad command in a cheatcode must not stop the boot.
+SuccessExitStatus=0 1
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target
+CXUNIT
+	sd_enable cliexec-cheat.service
 fi
+
+# default-target= / enable-services= / disable-services= (MiniOS).
+#
+# The systemd-native counterparts of the runlevel cheatcodes. Porteus has no
+# equivalent because it has no targets; these come from MiniOS, which met the
+# same problem porting this lineage to a systemd Debian and answered it by
+# adding codes that speak systemd rather than by pretending inittab still
+# exists.
+#
+# All three are written offline, as symlinks in /etc/systemd/system, which is
+# exactly what systemctl enable/mask create. Nothing here needs systemd to be
+# running, which it is not - this is still the initrd.
+DEFTGT=`value default-target`
+if [ "$DEFTGT" ]; then
+	case "$DEFTGT" in *.target) ;; *) DEFTGT="$DEFTGT.target" ;; esac
+	TP=`sd_unit_path "$DEFTGT"`
+	if [ "$TP" ]; then
+		echo $i"default target: $DEFTGT"
+		ln -sf "$TP" /union/etc/systemd/system/default.target 2>/dev/null
+	else
+		echo $i"default-target: $DEFTGT is not installed - ignoring"
+	fi
+fi
+
+ENSVC=`value enable-services | tr ',;' '  '`
+for u in $ENSVC; do
+	case "$u" in *.*) ;; *) u="$u.service" ;; esac
+	if sd_unit_path "$u" >/dev/null; then
+		echo $i"enabling $u"
+		sd_unmask "$u"; sd_enable "$u"
+	else
+		echo $i"enable-services: $u is not installed - ignoring"
+	fi
+done
+
+DISVC=`value disable-services | tr ',;' '  '`
+for u in $DISVC; do
+	case "$u" in *.*) ;; *) u="$u.service" ;; esac
+	# Masked rather than disabled, so a unit pulled in as another unit's
+	# dependency stays down too. Disabling alone would not achieve that,
+	# and "disable-services" that leaves the service running is worse than
+	# no cheatcode at all.
+	echo $i"disabling $u"
+	sd_disable "$u"; sd_mask "$u"
+done
 
 # guiexec= : run once the desktop is up.  The commands go into one script that
 # is started two ways, because neither way covers every build on its own:
@@ -1240,57 +1355,94 @@ rm -r /lib/* /usr/*
 
 debug
 
+
+# Where the old root goes when systemd is the target.
+#
+# Porteus pivots it to /mnt/live and that is all sysvinit needs. systemd wants
+# it at /run/initramfs: at shutdown systemd looks there for an executable
+# called `shutdown`, re-execs into it, and that script is what unmounts the
+# union and the boot medium after the real root is gone. Without it systemd has
+# nowhere to stand while tearing the union down, and the last unmounts fail.
+#
+# /mnt/live is kept as a symlink because a great deal already refers to it -
+# the pxe cheatcode's generated server script, copy2ram, and every changes=
+# path a user has ever written down.
+setup_shutdown_root() {
+	mkdir -p /union/run/initramfs 2>/dev/null || return 1
+	cat > /union/run/initramfs/shutdown <<'SHUTDOWN'
+#!/bin/sh
+# Run by systemd from /run/initramfs after it has left the real root, so the
+# union and the medium underneath it can be taken apart. Best effort by design:
+# a failed unmount here must not stop the machine from powering off.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ACTION=$1
+umount -l /oldroot/memory/images/* 2>/dev/null
+umount -l /oldroot/memory/changes  2>/dev/null
+umount -l /oldroot                 2>/dev/null
+losetup -D 2>/dev/null
+case "$ACTION" in
+	reboot)   reboot   -f ;;
+	poweroff) poweroff -f ;;
+	halt)     halt     -f ;;
+	kexec)    kexec    -e 2>/dev/null; reboot -f ;;
+	*)        poweroff -f ;;
+esac
+SHUTDOWN
+	chmod +x /union/run/initramfs/shutdown 2>/dev/null
+	return 0
+}
+
 echo "[1m""live system is ready now - starting Debian""[0m"
 
-if param init=/bin/systemd; then
-	if [ -f /union/lib/systemd/systemd ]; then
-cp -f /union/lib/systemd/systemd /bin
-		if [ $? -eq 0 ]; then
-	mkdir -p /union/mnt/live
-echo "[1m""using systemd...""[0m"
-    pivot_root /union  /union/mnt/live
-    exec usr/sbin/chroot . /mnt/live/bin/systemd "$@" <dev/console >dev/console 2>&1
-		else
-    echo -e "[31m""!!ERROR!!\nSomething went wrong and I cannot continue.\nPress Ctrl+Alt+Del to reboot.""[0m"
-    sh  
-		fi
-	else
- echo "[1m""systemd not found, trying to use initscripts...""[0m" 
-cp -f /union/sbin/init /bin
-		if [ $? -eq 0 ]; then
-	mkdir -p /union/mnt/live
-    pivot_root /union  /union/mnt/live
-    exec usr/sbin/chroot . /mnt/live/bin/init "$@" <dev/console >dev/console 2>&1
-		else
-    echo -e "[31m""!!ERROR!!\nSomething went wrong and I cannot continue.\nPress Ctrl+Alt+Del to reboot.""[0m"
-    sh
-		fi
-	fi
-else
-    if [ -L /union/sbin/init ]; then
-echo "[1m""/sbin/init appears to be a symlink, assuming systemd-sysv is installed""[0m"
-echo "[1m""trying to switch to systemd now...""[0m"
-cp -f /union/lib/systemd/systemd /bin
-		if [ $? -eq 0 ]; then
-	mkdir -p /union/mnt/live
-echo "[1m""using systemd...""[0m"
-    pivot_root /union  /union/mnt/live
-    exec usr/sbin/chroot . /mnt/live/bin/systemd "$@" <dev/console >dev/console 2>&1
-		else
-    echo -e "[31m""!!ERROR!!\nSomething went wrong and I cannot continue.\nPress Ctrl+Alt+Del to reboot.""[0m"
-    sh  
-		fi
-    else
-cp -f /union/sbin/init /bin
-		if [ $? -eq 0 ]; then
-	mkdir -p /union/mnt/live
-    pivot_root /union  /union/mnt/live
-    exec usr/sbin/chroot . /mnt/live/bin/init "$@" <dev/console >dev/console 2>&1
-		else
-    echo -e "[31m""!!ERROR!!\nSomething went wrong and I cannot continue.\nPress Ctrl+Alt+Del to reboot.""[0m"
-    sh
-		fi
-    fi
+# Hand off to systemd.
+#
+# The old script had four branches here - systemd or sysvinit, each with an
+# init= override - which came from the days when this initrd had to serve both.
+# One remains. systemd is found where Debian puts it, copied into the initrd's
+# /bin so it survives the pivot, and exec'd as PID 1.
+#
+# init= is still honoured for anything else you might want as PID 1 (a shell,
+# say, to debug a union that assembles but will not boot).
+INIT_OVERRIDE=`value init`
+
+SDBIN=
+for c in /union/lib/systemd/systemd /union/usr/lib/systemd/systemd; do
+	[ -x "$c" ] && { SDBIN=$c; break; }
+done
+
+if [ "$INIT_OVERRIDE" ] && [ "$INIT_OVERRIDE" != "/bin/systemd" ]; then
+	echo -e "${YELLOW}init=$INIT_OVERRIDE given - starting that instead of systemd${RST}"
+	mkdir -p /union/run/initramfs
+	setup_shutdown_root
+	pivot_root /union /union/run/initramfs
+	rm -rf mnt/live 2>/dev/null; mkdir -p mnt 2>/dev/null
+	ln -sf /run/initramfs mnt/live 2>/dev/null
+	exec usr/sbin/chroot . "$INIT_OVERRIDE" "$@" <dev/console >dev/console 2>&1
 fi
 
-
+if [ -z "$SDBIN" ]; then
+	echo -e "${RED}!!ERROR!!${RST}"
+	echo -e "${RED}No systemd found in the union. This initrd starts systemd and"
+	echo -e "nothing else; a sysvinit image needs the initrd from the linuxrc"
+	echo -e "branch instead.${RST}"
+	echo -e "${YELLOW}Dropping to a shell. Ctrl+Alt+Del reboots.${RST}"
+	sh
+else
+	cp -f "$SDBIN" /bin/systemd
+	if [ $? -eq 0 ]; then
+		mkdir -p /union/run/initramfs
+		setup_shutdown_root
+		echo -e "${BOLD}using systemd...${RST}"
+		# /run/initramfs, not /mnt/live: at shutdown systemd re-execs into
+		# /run/initramfs/shutdown to unmount the union after the real root is
+		# gone. Pivoting anywhere else leaves it with nowhere to stand.
+		pivot_root /union /union/run/initramfs
+		# Everything written before systemd support refers to /mnt/live.
+		rm -rf mnt/live 2>/dev/null; mkdir -p mnt 2>/dev/null
+		ln -sf /run/initramfs mnt/live 2>/dev/null
+		exec usr/sbin/chroot . /run/initramfs/bin/systemd "$@" <dev/console >dev/console 2>&1
+	else
+		echo -e "${RED}!!ERROR!!\nCould not copy systemd into the initrd.\nPress Ctrl+Alt+Del to reboot.${RST}"
+		sh
+	fi
+fi
