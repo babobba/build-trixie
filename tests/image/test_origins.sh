@@ -28,6 +28,57 @@ mount_image "$@"
 STATUS="$ROOT/var/lib/dpkg/status"
 [ -f "$STATUS" ] || skip "no dpkg database in the image"
 
+# Which image is this? The repo builds two, and they are meant to be different
+# systems - configs-trixie/default.conf gives Devuan with sysvinit,
+# default-systemd.conf gives Debian with systemd. Asserting Devuan-ness against
+# the systemd image fails ten checks for the entirely wrong reason, so the
+# distribution decides which set of assertions applies.
+#
+# Read from the image rather than passed in, so the test cannot be pointed at
+# the wrong expectations.
+DISTRO_ID=$(sed -n 's/^ID=//p' "$ROOT/etc/os-release" 2>/dev/null | tr -d '"')
+echo "   image reports ID=$DISTRO_ID"
+
+if [ "$DISTRO_ID" != devuan ]; then
+	echo "-- this is the Debian/systemd image"
+	assert_equal "os-release says debian" "debian" "$DISTRO_ID"
+	assert_file "systemd is installed" "$ROOT/lib/systemd/systemd"
+	assert_symlink "/sbin/init points at it" "$ROOT/sbin/init" "../lib/systemd/systemd"
+
+	echo "-- and carries none of the Devuan apparatus"
+	NDEV=$(awk '/^Package:/{p=$2} /^Version:/{if ($2 ~ /devuan/) print p}' "$STATUS" | wc -l)
+	assert_equal "no Devuan-versioned packages" "0" "$(echo $NDEV)"
+	assert_no_file "no 99devuan pin"  "$ROOT/etc/apt/preferences.d/99devuan"
+	# 00systemd pins systemd to -1; it is what keeps systemd out of the Devuan
+	# build, so its presence here would be a contradiction rather than a
+	# leftover.
+	assert_no_file "no 00systemd pin" "$ROOT/etc/apt/preferences.d/00systemd"
+	assert_equal "sysvinit-core is not installed" "" \
+		"$(awk '/^Package: sysvinit-core$/{f=1} f&&/^Status:/{print;exit}' "$STATUS" | grep 'ok installed')"
+
+	echo "-- the archives it was built from"
+	SRC="$ROOT/etc/apt/sources.list"
+	assert_file "sources.list exists" "$SRC"
+	assert_equal "every archive is reached over https" "" \
+		"$(grep -E '^[[:space:]]*deb ' "$SRC" | grep -v 'https://' | tr '\n' ' ')"
+	assert_equal "no Devuan repository" "" \
+		"$(grep -c 'devuan' "$SRC" | grep -v '^0$')"
+	# A repository whose key never arrived breaks apt update forever. The build
+	# skips such an entry rather than writing it; this is the check that it did.
+	BADSRC=""
+	for f in "$ROOT"/etc/apt/sources.list.d/*.sources "$ROOT"/etc/apt/sources.list.d/*.list; do
+		[ -f "$f" ] || continue
+		k=$(sed -n 's/^Signed-By: *//p;s/.*signed-by=\([^]]*\).*/\1/p' "$f" | head -1)
+		[ -n "$k" ] && [ ! -s "$ROOT$k" ] && BADSRC="$BADSRC $(basename "$f")"
+	done
+	assert_empty "no repository with a missing keyring" "$BADSRC"
+
+	finish
+	exit
+fi
+
+echo "-- this is the Devuan/sysvinit image"
+
 # ------------------------------------------------------- classify by origin
 
 # Two independent signals, because neither is complete on its own. Most Devuan

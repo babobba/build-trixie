@@ -37,9 +37,22 @@ echo "   $NSUM of $NPKG packages carry md5sums"
 echo "-- packages are in a coherent state"
 dpkg --root="$ROOT" --audit > "$WORK/audit" 2>&1 || true
 assert_equal "dpkg --audit reports nothing" "" "$(cat "$WORK/audit")"
-BADSTATE=$(awk '/^Package:/{p=$2} /^Status:/{if ($0 !~ /install ok installed/) print p}' \
+# "deinstall ok config-files" is a removed package whose conffiles remain. That
+# is the normal end state after swapping init systems - the Debian/systemd image
+# carries initscripts, insserv and sysv-rc in exactly that state because
+# systemd-sysv displaced them - and it is not a broken install. Only genuinely
+# incomplete states matter here: half-installed, unpacked, half-configured,
+# triggers-pending.
+BADSTATE=$(awk '/^Package:/{p=$2}
+	/^Status:/{ if ($0 !~ /install ok installed/ && $0 !~ /deinstall ok config-files/) print p }' \
 	"$ROOT/var/lib/dpkg/status" | tr '\n' ' ')
-assert_empty "every package is fully installed" "$BADSTATE"
+assert_empty "no package is left half-installed" "$BADSTATE"
+# The exclusion must not be a blanket one: a package stuck half-configured has
+# to still fail, so check the pattern only tolerates the removed-with-conffiles
+# state.
+assert_equal "the tolerated state is only 'deinstall ok config-files'" "" \
+	"$(awk '/^Status:/{if ($0 ~ /half-installed|half-configured|unpacked|triggers-pending/) print}' \
+		"$ROOT/var/lib/dpkg/status" | head -1)"
 
 echo "-- deleted files are only in the trees the build strips"
 # The build removes documentation, manual pages, locales and info files. Those
@@ -107,9 +120,17 @@ echo "-- the Devuan archive keyrings are the ones their package installed"
 # "not present", and an inline `grep -v` gets that backwards: grep -v succeeds
 # whenever *any* other line differs, so it is true no matter what.
 matches_package() { ! echo "$CHANGED" | grep -qx -- "$1"; }
-for f in $STALE_KEYRINGS; do
-	xfail "$(basename "$f") matches devuan-keyring" matches_package "$f"
-done
+# Devuan images only. The Debian/systemd image has no devuan-keyring package
+# and no Devuan keyrings for the overlay to write over, so the marker has
+# nothing to describe there - and left unconditional it XPASSes, which reads as
+# "the bug is fixed" when the truth is "this image never had it".
+if [ "$(sed -n 's/^ID=//p' "$ROOT/etc/os-release" 2>/dev/null | tr -d '"')" = devuan ]; then
+	for f in $STALE_KEYRINGS; do
+		xfail "$(basename "$f") matches devuan-keyring" matches_package "$f"
+	done
+else
+	echo "   (not a Devuan image - the keyring overwrite does not apply)"
+fi
 
 echo "-- and the list of expected changes has not gone stale"
 for f in $KNOWN_CHANGED; do
