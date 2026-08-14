@@ -1,0 +1,90 @@
+#!/bin/sh
+# Build MiniOS in its default configuration.
+#
+# Upstream is cloned, not vendored, and linux-live/build.conf is left exactly as
+# it ships. Everything this script does is to work around the fact that this
+# build container reaches the network through a proxy that serves only HTTPS
+# CONNECT; none of it changes what MiniOS produces.
+#
+#     ./minios/build-minios              # clone if needed, then build
+#     SRC=/path/to/minios-live ./minios/build-minios
+#
+# Needs root, and about 12 GB of free disk.
+set -eu
+
+SRC=${SRC:-/workspace/minios-linux/minios-live}
+UPSTREAM=https://github.com/minios-linux/minios-live
+
+[ "$(id -u)" = 0 ] || { echo "this needs root (debootstrap, mount, chroot)"; exit 1; }
+
+# --------------------------------------------------------------- host packages
+# prerequisites.list covers most of these. gettext is absent from it, and its
+# absence is not fatal - it just fills the log with "gettext: command not found"
+# where the translated messages should be - so it is easy to miss.
+echo "== host prerequisites"
+MISSING=
+for pkg in mtools rsync grub-common lz4 zstd gettext syslinux isolinux \
+           syslinux-common grub-efi-amd64-bin grub-pc-bin dosfstools \
+           debootstrap squashfs-tools xorriso; do
+	dpkg -s "$pkg" >/dev/null 2>&1 || MISSING="$MISSING $pkg"
+done
+if [ -n "$MISSING" ]; then
+	echo "   installing:$MISSING"
+	# shellcheck disable=SC2086
+	apt-get install -y -qq $MISSING
+else
+	echo "   all present"
+fi
+
+# ------------------------------------------------------------ sudo environment
+# minioslib runs debootstrap as `sudo DEBIAN_FRONTEND=... debootstrap ...` with
+# no -E, so sudo strips https_proxy and CURL_CA_BUNDLE and debootstrap fails
+# with "Failed getting release file" - while curl fetches the identical URL
+# without trouble, which sends you looking at the mirror instead of at sudo.
+#
+# Done through sudoers so the upstream tree stays stock.
+if [ -n "${https_proxy:-}${HTTPS_PROXY:-}" ]; then
+	echo "== letting the proxy environment survive sudo"
+	cat > /etc/sudoers.d/keep-proxy <<'EOF'
+Defaults env_keep += "http_proxy https_proxy ftp_proxy no_proxy HTTP_PROXY HTTPS_PROXY FTP_PROXY NO_PROXY CURL_CA_BUNDLE SSL_CERT_FILE SSL_CERT_DIR REQUESTS_CA_BUNDLE"
+EOF
+	chmod 440 /etc/sudoers.d/keep-proxy
+	visudo -c -f /etc/sudoers.d/keep-proxy >/dev/null
+fi
+
+# ------------------------------------------------------------------- the source
+if [ ! -d "$SRC/.git" ]; then
+	echo "== cloning $UPSTREAM"
+	mkdir -p "$(dirname "$SRC")"
+	GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 "$UPSTREAM" "$SRC"
+else
+	echo "== using existing checkout at $SRC"
+fi
+
+# ------------------------------------------------------------------ https only
+# Both hosts serve HTTPS; only the scheme in the shipped config has to change.
+# deb.minios.dev has to be reachable at all - roughly twenty minios-* packages
+# come from it, including the live-boot machinery, and the signing-key fetch
+# uses curl --fail, so an unreachable host stops the build rather than
+# degrading it.
+echo "== rewriting mirrors to https"
+sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
+	"$SRC/linux-live/aptsources/trixie.list" \
+	"$SRC/linux-live/aptsources/debian.list" \
+	"$SRC/linux-live/minioslib"
+sed -i 's|http://deb.minios.dev|https://deb.minios.dev|g' "$SRC/linux-live/minioslib"
+sed -i 's|CHECK_INTERNET_ADDRESS="http://|CHECK_INTERNET_ADDRESS="https://|' \
+	"$SRC/linux-live/build.conf"
+
+# build.conf is otherwise untouched. Show what is about to be built so a change
+# in upstream defaults is visible in the log rather than silent.
+echo "== building with upstream defaults:"
+grep -E '^(DISTRIBUTION|DISTRIBUTION_ARCH|DESKTOP_ENVIRONMENT|PACKAGE_VARIANT|COMP_TYPE|INITRAMFS_BUILDER|BOOTLOADER|DEFAULT_TARGET)=' \
+	"$SRC/linux-live/build.conf" | sed 's/^/   /'
+
+cd "$SRC"
+./minios-live build-bootstrap - build-iso
+
+echo
+echo "== ISO:"
+find "$SRC" -name '*.iso' -newermt '-1 day' -printf '   %p (%s bytes)\n' 2>/dev/null
