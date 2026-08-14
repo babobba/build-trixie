@@ -24,6 +24,8 @@ WORK=${WORK:-/tmp/minios-boot}
 MON=/tmp/minios-mon.sock          # QEMU rejects socket paths over 107 bytes
 SSH_PORT=${SSH_PORT:-2222}
 BOOT_TIMEOUT=${BOOT_TIMEOUT:-420}
+# Painting the desktop under TCG takes minutes after the session process exists.
+PAINT_TIMEOUT=${PAINT_TIMEOUT:-480}
 # Defaults documented in linux-live/build.conf.
 USER=${USER_NAME:-live}
 PASS=${USER_PASS:-evil}
@@ -92,18 +94,41 @@ if [ -n "$up" ]; then
 	done
 fi
 
-# A screenshot either way: if the boot failed this is the only evidence of where
-# it stopped, and if it worked it is the only evidence anything reached the
-# display. The keystroke and the DPMS nudge are there so a blanked screen is not
-# mistaken for a blank one.
-if [ -S "$MON" ]; then
+# Capture once: wake the display first so a blanked screen is never mistaken
+# for a blank one, then screendump and report the mean grey level.
+capture() {
 	mon "sendkey shift"
 	guest 'DISPLAY=:0 xset dpms force on; DISPLAY=:0 xset s reset' >/dev/null 2>&1
-	sleep 3
+	sleep 2
+	rm -f "$WORK/screen.ppm"
 	mon "screendump $WORK/screen.ppm"
 	sleep 3
-	[ -f "$WORK/screen.ppm" ] && command -v convert >/dev/null \
-		&& convert "$WORK/screen.ppm" "$WORK/screen.png" 2>/dev/null
+	[ -f "$WORK/screen.ppm" ] || return 1
+	command -v convert >/dev/null || return 1
+	convert "$WORK/screen.ppm" "$WORK/screen.png" 2>/dev/null || return 1
+	convert "$WORK/screen.png" -colorspace Gray -format "%[fx:mean]" info: 2>/dev/null
+}
+
+# Poll rather than capture once. xfdesktop being *running* does not mean it has
+# drawn anything: with the session process present at 207s the frame was still
+# 9.9e-05, i.e. black at the right resolution. Painting a wallpaper, panel and
+# icons under TCG with no KVM takes minutes more, so the only honest test is to
+# keep looking until the screen has content or the budget runs out.
+MEAN=""
+if [ -S "$MON" ]; then
+	echo "   waiting for the desktop to paint (budget ${PAINT_TIMEOUT}s)"
+	ct=$(date +%s)
+	while :; do
+		M=$(capture)
+		if [ -n "$M" ] && awk -v m="$M" 'BEGIN{exit !(m>0.05)}'; then
+			MEAN=$M
+			echo "   screen painted at $(( $(date +%s) - start ))s (mean $MEAN)"
+			break
+		fi
+		MEAN=${M:-0}
+		[ $(( $(date +%s) - ct )) -ge "$PAINT_TIMEOUT" ] && break
+		sleep 20
+	done
 fi
 
 echo "== results"
@@ -171,20 +196,14 @@ case "$(get INITRD)" in
 	*)  _pass "the old root is preserved at /run/initramfs ($(get INITRD))" ;;
 esac
 
-# The display, measured rather than eyeballed. An all-black frame reads 0; the
-# Xfce desktop reads about 0.55. The threshold only has to separate "something
-# was drawn" from "nothing was".
-if [ -f "$WORK/screen.png" ] && command -v convert >/dev/null; then
-	MEAN=$(convert "$WORK/screen.png" -colorspace Gray -format "%[fx:mean]" info: 2>/dev/null)
-	case "$MEAN" in
-		"") _fail "the screen was captured" "convert produced no reading" ;;
-		*)  awk -v m="$MEAN" 'BEGIN{exit !(m>0.05)}' \
-				&& _pass "something was drawn on the screen (mean $MEAN)" \
-				|| _fail "something was drawn on the screen" "mean $MEAN - the frame is blank" ;;
-	esac
-else
-	_fail "the screen was captured" "no screenshot was produced"
-fi
+# The display, measured rather than eyeballed. An all-black frame reads ~0; the
+# painted Xfce desktop reads about 0.55.
+case "$MEAN" in
+	"") _fail "the screen was captured" "no screenshot was produced" ;;
+	*)  awk -v m="$MEAN" 'BEGIN{exit !(m>0.05)}' \
+			&& _pass "the desktop is drawn on the screen (mean $MEAN)" \
+			|| _fail "the desktop is drawn on the screen" "mean $MEAN after ${PAINT_TIMEOUT}s - still blank" ;;
+esac
 
 kill $QPID 2>/dev/null; wait $QPID 2>/dev/null
 
