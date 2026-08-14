@@ -72,13 +72,36 @@ while :; do
 	sleep 5
 done
 
-# A screenshot regardless of how SSH went: if the boot failed this is the only
-# evidence of where it stopped, and if it succeeded it is the only evidence that
-# anything reached the display.
+# -q1 matters: plain `nc -U` delivers the command and then sits there holding
+# the monitor socket forever, which wedges the test and blocks the next
+# connection, since QEMU's monitor takes one client at a time.
+mon() { printf '%s\n' "$1" | timeout 15 nc -q1 -U "$MON" >/dev/null 2>&1; }
+
+# sshd answers well before the desktop has painted. Screenshotting at that
+# moment produces a completely black frame at the right resolution, which looks
+# like a broken graphics stack and is really just impatience - so wait for the
+# session to exist before believing the screen.
+if [ -n "$up" ]; then
+	echo "   waiting for the desktop session"
+	dt=$(date +%s)
+	while :; do
+		guest 'pgrep -x xfdesktop >/dev/null || pgrep -x xfce4-session >/dev/null' \
+			&& { echo "   desktop session at $(( $(date +%s) - start ))s"; break; }
+		[ $(( $(date +%s) - dt )) -ge 180 ] && { echo "   no desktop session after 180s"; break; }
+		sleep 10
+	done
+fi
+
+# A screenshot either way: if the boot failed this is the only evidence of where
+# it stopped, and if it worked it is the only evidence anything reached the
+# display. The keystroke and the DPMS nudge are there so a blanked screen is not
+# mistaken for a blank one.
 if [ -S "$MON" ]; then
-	printf 'screendump %s\n' "$WORK/screen.ppm" | timeout 20 socat - UNIX-CONNECT:"$MON" >/dev/null 2>&1 \
-		|| printf 'screendump %s\n' "$WORK/screen.ppm" | timeout 20 nc -U "$MON" >/dev/null 2>&1
-	sleep 2
+	mon "sendkey shift"
+	guest 'DISPLAY=:0 xset dpms force on; DISPLAY=:0 xset s reset' >/dev/null 2>&1
+	sleep 3
+	mon "screendump $WORK/screen.ppm"
+	sleep 3
 	[ -f "$WORK/screen.ppm" ] && command -v convert >/dev/null \
 		&& convert "$WORK/screen.ppm" "$WORK/screen.png" 2>/dev/null
 fi
@@ -147,6 +170,21 @@ case "$(get INITRD)" in
 	"") _fail "the old root is at /run/initramfs" "it is empty - the pivot target differs" ;;
 	*)  _pass "the old root is preserved at /run/initramfs ($(get INITRD))" ;;
 esac
+
+# The display, measured rather than eyeballed. An all-black frame reads 0; the
+# Xfce desktop reads about 0.55. The threshold only has to separate "something
+# was drawn" from "nothing was".
+if [ -f "$WORK/screen.png" ] && command -v convert >/dev/null; then
+	MEAN=$(convert "$WORK/screen.png" -colorspace Gray -format "%[fx:mean]" info: 2>/dev/null)
+	case "$MEAN" in
+		"") _fail "the screen was captured" "convert produced no reading" ;;
+		*)  awk -v m="$MEAN" 'BEGIN{exit !(m>0.05)}' \
+				&& _pass "something was drawn on the screen (mean $MEAN)" \
+				|| _fail "something was drawn on the screen" "mean $MEAN - the frame is blank" ;;
+	esac
+else
+	_fail "the screen was captured" "no screenshot was produced"
+fi
 
 kill $QPID 2>/dev/null; wait $QPID 2>/dev/null
 
