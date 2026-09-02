@@ -41,6 +41,13 @@ if {[info exists env(USER_PASSWORD)]} { set userpw $env(USER_PASSWORD) }
 # prompt serves both, so count which one this is.
 set pwcount 0
 
+# build-trixie exits 0 on some of its own failures - a failed debootstrap ends
+# in "Failed to install the base system ... exiting now" and a bare `exit`.
+# Passing that 0 through would make a failed build indistinguishable from a
+# finished one to anything scripted around this, so the messages are watched
+# for and turned into a non-zero exit here.
+set failed 0
+
 spawn ./build-trixie $conf
 expect {
     -re "delete contents of directory trixie.*\\?" { send "\r"; exp_continue }
@@ -57,10 +64,13 @@ expect {
     "then press ENTER to continue"                 { send "\r"; exp_continue }
     -re "Type gzip(, xz or zstd| or xz) :"         { send "$comp\r"; exp_continue }
     "This config file cannot be used"              { puts stderr "config rejected"; exit 1 }
+    "Failed to install the base system"            { set failed 1; exp_continue }
+    "Failed unmounting all mount binds"            { set failed 1; exp_continue }
     eof                                            { }
     timeout                                        { puts stderr "TIMED OUT waiting for build-trixie"; exit 1 }
 }
 catch wait result
 set rc [lindex $result 3]
+if {$failed && $rc == 0} { puts stderr "build-trixie reported a failure but exited 0"; set rc 1 }
 if {$rc != 0} { puts stderr "build-trixie exited $rc" }
 exit $rc
