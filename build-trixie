@@ -366,9 +366,9 @@ echo -e "\e[0;36mSetting up debootstrap in trixie/chroot\033[0m"
 echo -e "\e[0;36mThis may take a while...\033[0m"
 mkdir -p trixie/chroot && cd trixie &&
 if [ "$SYSTEMD" = "FALSE" ]; then  # no systemd, devuan
-debootstrap --arch=$ARCH --variant=minbase --include=curl,apt-transport-https,ca-certificates,initscripts,adduser excalibur chroot http://pkgmaster.devuan.org/merged
+debootstrap --arch=$ARCH --variant=minbase --include=curl,apt-transport-https,ca-certificates,initscripts,adduser excalibur chroot https://pkgmaster.devuan.org/merged
 else
-debootstrap --arch=$ARCH --variant=minbase --include=curl,apt-transport-https,ca-certificates,initscripts,adduser trixie chroot http://deb.debian.org/debian/
+debootstrap --arch=$ARCH --variant=minbase --include=curl,apt-transport-https,ca-certificates,initscripts,adduser trixie chroot https://deb.debian.org/debian/
 fi
 ret=$?
 echo $ret
@@ -715,9 +715,9 @@ rm -f /tmp/*.deb 2> /dev/null
 echo -e "\e[0;36mInstall the kernel, download and extract\033[0m"
 mkdir -p /tmp/tmpapt
 if [ "$ARCH" = "i386" ]; then  # download bookworm kernel (linux-image-6.1)
-wget -q -O tmp.html http://deb.debian.org/debian/pool/main/l/linux/
+wget -q -O tmp.html https://deb.debian.org/debian/pool/main/l/linux/
 BWKERN=`cat tmp.html | grep -o -E "linux-image-6.1[^<>]*?i386.deb" | grep 686-pae-unsigned | grep -v ".-rt" | tail -1`
-wget http://deb.debian.org/debian/pool/main/l/linux/$BWKERN -O /tmp/tmpapt/$BWKERN
+wget https://deb.debian.org/debian/pool/main/l/linux/$BWKERN -O /tmp/tmpapt/$BWKERN
 fi
 #[ "$ARCH" = "i386" ] && apt-get -o dir::cache::archives="/tmp/tmpapt" install -d linux-image-686-pae -y
 [ "$ARCH" = "amd64" ] && apt-get -o dir::cache::archives="/tmp/tmpapt" install -d linux-image-amd64 -y
