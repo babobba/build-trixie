@@ -82,6 +82,7 @@ assert_empty() {       # DESC ACTUAL   -- for list-shaped results
 	else _fail "$1" "unexpected: $2"; fi
 }
 assert_dir()     { [ -d "$2" ] && _pass "$1" || _fail "$1" "missing directory ${2#$ROOT}"; }
+assert_no_file() { [ -e "$2" ] && _fail "$1" "unexpected ${2#$ROOT}" || _pass "$1"; }
 assert_file()    { [ -f "$2" ] && _pass "$1" || _fail "$1" "missing file ${2#$ROOT}"; }
 assert_symlink() {     # DESC LINK TARGET
 	t=$(readlink "$2" 2>/dev/null)
