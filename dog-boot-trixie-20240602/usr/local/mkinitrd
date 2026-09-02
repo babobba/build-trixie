@@ -33,7 +33,17 @@ copy_including_deps()
       return
    fi
 
-   cp -R --parents "$1" "$INITRAMFS"
+   # Directories keep their symlinks; files are dereferenced. The initrd is not
+   # merged-/usr: its /lib is a plain directory, so a symlink copied verbatim
+   # from a merged rootfs - /lib64/ld-linux-x86-64.so.2 pointing at
+   # ../lib/x86_64-linux-gnu/... - dangles there, while the real file lands
+   # under usr/lib where nothing looks for it. That left blockdev unable to
+   # start in every built initrd, and forensic silently protecting nothing.
+   if [ -d "$1" ]; then
+      cp -R --parents "$1" "$INITRAMFS"
+   else
+      cp -L --parents "$1" "$INITRAMFS"
+   fi
    if [ -L "$1" ]; then
       DIR="$(dirname "$1")"
       LNK="$(readlink "$1")"
