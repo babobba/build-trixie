@@ -64,6 +64,7 @@ runtime.
 | `readonly` | new | Mount discovered filesystems read-only (`noload` on ext) |
 | `forensic` | new | `blockdev --setro` on every disk and partition |
 | `nomagic` | Porteus | Skip binding the magic folders |
+| `pxe` | Porteus | Serve this live system to other machines |
 
 `cliexec=` and `guiexec=` follow Porteus syntax: `;` separates commands, `~`
 stands in for a space.
@@ -160,7 +161,7 @@ which are always there.
   initrd implemented it. It is now real: magic folders are implemented, and
   `nomagic` skips them.
 
-## Deliberately not ported
+## Serving other machines with `pxe`
 
 - `pxe` — on Porteus this turns the booted machine into a PXE *server*, by
   starting tftpd, dhcpcd and an NFS server. None of those daemons is in a
@@ -212,6 +213,51 @@ The scratch disk it binds from is partitioned, so the source path is
 `/mnt/sda1/...`. The config lists `/mnt/sdb1/...` as well; whichever does not
 exist reports itself on the console, which is the "source not found" case
 tested for free.
+On Porteus this turns the booted machine into a PXE server. The equivalent
+here is `dnsmasq`, which does TFTP and PXE in one, plus `nfs-kernel-server`
+and `pxelinux`. None of those is in a default image, so build with
+`configs-trixie/default-pxe.conf`, which is `default.conf` plus those four
+packages.
+
+What it serves is what this initrd already knows how to consume. The boot line
+written into `pxelinux.cfg/default` uses `ip=` and `nfspath=`, and points
+`storage=` at the per-client directory, so a client netboots with no
+cheatcodes of its own and gets persistence for free.
+
+The live tree is bind-mounted into the export rather than copied. The export
+root sits in the RAM overlay, and copying a 570 MB squashfs into it would run
+the machine out of memory.
+
+Two deliberate choices about not breaking someone else's network. `dnsmasq`
+runs in **proxy DHCP** mode: it answers PXE requests alongside whatever DHCP
+server the network already has instead of handing out addresses, because a
+second DHCP server on a network you do not own is a good way to break it. And
+the export is read-only apart from the per-client storage directory, so a
+netbooted client cannot write over the system every other client is booting.
+
+If a package is missing the generated script names it and stops, rather than
+half-starting a server that appears to work.
+
+Not verified end to end: that needs two machines, or two VMs on one virtual
+network, and the tests cover the generated configuration rather than a real
+client completing a netboot.
+
+### Testing it
+
+`tests/linuxrc/boot-test-pxe.sh` boots a default-config ISO with `pxe` given.
+A full end-to-end test needs a second VM on a shared virtual network, which
+this does not do; what it settles is the case almost everyone will hit first,
+which is asking for a PXE server on an image that was not built to be one.
+
+The generated script has to be written and executable, has to find the live
+directory, and then has to name every missing package and point at
+`default-pxe.conf` rather than half-starting something broken. It must exit
+non-zero without adding a line to `/etc/exports` or writing a dnsmasq config,
+and the boot must still reach the desktop — the script runs from `rc.local`
+before the graphical session, so one that hung or wrote configuration on a
+machine that cannot serve anything would be a real regression on the default
+path. Running it again with `nfspath=` set checks that the export root in the
+generated script follows the cheatcode instead of being hardcoded.
 
 ## Testing
 
