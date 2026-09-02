@@ -28,41 +28,26 @@ mount_image "$@"
 STATUS="$ROOT/var/lib/dpkg/status"
 [ -f "$STATUS" ] || skip "no dpkg database in the image"
 
-# Which image is this? The repo builds two, and they are meant to be different
-# systems - configs-trixie/default.conf gives Devuan with sysvinit,
-# default-systemd.conf gives Debian with systemd. Asserting Devuan-ness against
-# the systemd image fails ten checks for the entirely wrong reason, so the
-# distribution decides which set of assertions applies.
-#
-# Read from the image rather than passed in, so the test cannot be pointed at
-# the wrong expectations.
+# Which image is this? Both are Debian now; what differs is the init. The
+# distribution and the init are read from the image itself rather than passed
+# in, so the test cannot be pointed at the wrong expectations. A Devuan image
+# is still recognised for the sake of anything built from an older branch.
 DISTRO_ID=$(sed -n 's/^ID=//p' "$ROOT/etc/os-release" 2>/dev/null | tr -d '"')
-echo "   image reports ID=$DISTRO_ID"
+INIT_TARGET=$(readlink "$ROOT/sbin/init" 2>/dev/null)
+case "$INIT_TARGET" in *systemd*) INIT=systemd ;; *) INIT=sysvinit ;; esac
+echo "   image reports ID=$DISTRO_ID, /sbin/init is $INIT"
 
-if [ "$DISTRO_ID" != devuan ]; then
-	echo "-- this is the Debian/systemd image"
+debian_common() {
+	echo "-- it is Debian, built from Debian archives only"
 	assert_equal "os-release says debian" "debian" "$DISTRO_ID"
-	assert_file "systemd is installed" "$ROOT/lib/systemd/systemd"
-	assert_symlink "/sbin/init points at it" "$ROOT/sbin/init" "../lib/systemd/systemd"
-
-	echo "-- and carries none of the Devuan apparatus"
 	NDEV=$(awk '/^Package:/{p=$2} /^Version:/{if ($2 ~ /devuan/) print p}' "$STATUS" | wc -l)
 	assert_equal "no Devuan-versioned packages" "0" "$(echo $NDEV)"
-	assert_no_file "no 99devuan pin"  "$ROOT/etc/apt/preferences.d/99devuan"
-	# 00systemd pins systemd to -1; it is what keeps systemd out of the Devuan
-	# build, so its presence here would be a contradiction rather than a
-	# leftover.
-	assert_no_file "no 00systemd pin" "$ROOT/etc/apt/preferences.d/00systemd"
-	assert_equal "sysvinit-core is not installed" "" \
-		"$(awk '/^Package: sysvinit-core$/{f=1} f&&/^Status:/{print;exit}' "$STATUS" | grep 'ok installed')"
-
-	echo "-- the archives it was built from"
+	assert_no_file "no 99devuan pin" "$ROOT/etc/apt/preferences.d/99devuan"
 	SRC="$ROOT/etc/apt/sources.list"
 	assert_file "sources.list exists" "$SRC"
 	assert_equal "every archive is reached over https" "" \
 		"$(grep -E '^[[:space:]]*deb ' "$SRC" | grep -v 'https://' | tr '\n' ' ')"
-	assert_equal "no Devuan repository" "" \
-		"$(grep -c 'devuan' "$SRC" | grep -v '^0$')"
+	assert_equal "no Devuan repository" "" "$(grep -c 'devuan' "$SRC" | grep -v '^0$')"
 	# A repository whose key never arrived breaks apt update forever. The build
 	# skips such an entry rather than writing it; this is the check that it did.
 	BADSRC=""
@@ -72,10 +57,53 @@ if [ "$DISTRO_ID" != devuan ]; then
 		[ -n "$k" ] && [ ! -s "$ROOT$k" ] && BADSRC="$BADSRC $(basename "$f")"
 	done
 	assert_empty "no repository with a missing keyring" "$BADSRC"
+}
+installed() { awk -v P="$1" '$0=="Package: "P{f=1} f&&/^Status:/{print;exit}' "$STATUS" | grep -q 'ok installed'; }
 
-	finish
-	exit
+if [ "$DISTRO_ID" = debian ] && [ "$INIT" = systemd ]; then
+	debian_common
+	echo "-- and systemd is the init"
+	assert_file "systemd is installed" "$ROOT/lib/systemd/systemd"
+	assert_symlink "/sbin/init points at it" "$ROOT/sbin/init" "../lib/systemd/systemd"
+	installed systemd-sysv && _pass "systemd-sysv provides init" || _fail "systemd-sysv provides init"
+	installed sysvinit-core && _fail "sysvinit-core is not installed" || _pass "sysvinit-core is not installed"
+	# 00systemd pins the init packages to -1; it is what keeps systemd out of
+	# the sysvinit image, so its presence here would be a contradiction.
+	assert_no_file "no 00systemd pin" "$ROOT/etc/apt/preferences.d/00systemd"
+	finish; exit
 fi
+
+if [ "$DISTRO_ID" = debian ] && [ "$INIT" = sysvinit ]; then
+	debian_common
+	echo "-- and sysvinit is the init, from Debian's own packages"
+	installed sysvinit-core && _pass "sysvinit-core is installed" || _fail "sysvinit-core is installed"
+	installed initscripts  && _pass "initscripts is installed"   || _fail "initscripts is installed"
+	installed elogind      && _pass "elogind stands in for logind" || _fail "elogind stands in for logind"
+	installed libpam-elogind && _pass "libpam-elogind is installed" || _fail "libpam-elogind is installed"
+	[ -f "$ROOT/sbin/init" ] && [ ! -L "$ROOT/sbin/init" ] \
+		&& _pass "/sbin/init is sysvinit's own binary, not a link to systemd" \
+		|| _fail "/sbin/init is sysvinit's binary" "it is a symlink to '$INIT_TARGET'"
+
+	echo "-- systemd is really gone, not merely idle"
+	for p in systemd systemd-sysv libpam-systemd; do
+		installed $p && _fail "$p is not installed" || _pass "$p is not installed"
+	done
+	assert_no_file "no systemd binary" "$ROOT/lib/systemd/systemd"
+
+	echo "-- and kept out by a pin that does not take libsystemd0 with it"
+	PIN="$ROOT/etc/apt/preferences.d/00systemd"
+	assert_file "00systemd exists" "$PIN"
+	assert_equal "it names systemd" "yes" "$(grep -E '^Package:.*\bsystemd\b' "$PIN" >/dev/null && echo yes)"
+	assert_equal "it is not a glob" "" "$(grep -E '^Package:.*\*' "$PIN")"
+	assert_equal "at a negative priority" "yes" "$(grep -qE '^Pin-Priority: *-' "$PIN" && echo yes)"
+	# The proof the pin is narrow enough: libsystemd0 is a library half the
+	# desktop needs, and it must still be installed.
+	installed libsystemd0 && _pass "libsystemd0 is still installed" \
+		|| _fail "libsystemd0 is still installed" "the pin is catching the library"
+	finish; exit
+fi
+
+[ "$DISTRO_ID" = devuan ] || { echo "unrecognised image: ID=$DISTRO_ID init=$INIT"; _fail "a known image kind"; finish; exit; }
 
 echo "-- this is the Devuan/sysvinit image"
 

@@ -338,8 +338,8 @@ if [ $(command -v apt-get 2>/dev/null) ];then
  ok_or_failed
 fi
 
-# fredx181 2025-11-05, install newest devuan-keyring on host system
-dpkg -i devuan-keyring_2025.08.09_all.deb
+# (the Devuan keyring used to be installed here for a Devuan debootstrap;
+#  both images are Debian now, so there is nothing for it to verify)
 
 # install debootstrap deb # fredx181 2025-11-01, changed to devuan version
 DEBOOTSTRAP=debootstrap_1.0.134devuan2_all.deb
@@ -374,11 +374,11 @@ mkdir -p trixie/chroot && cd trixie
 ret=1
 for attempt in 1 2 3; do
   [ $attempt -gt 1 ] && { echo -e "\e[0;33mdebootstrap attempt $attempt of 3 (the last one failed - usually a mirror hiccup)\033[0m"; rm -rf chroot; mkdir -p chroot; }
-  if [ "$SYSTEMD" = "FALSE" ]; then  # no systemd, devuan
-  debootstrap --arch=$ARCH --variant=minbase --include=curl,apt-transport-https,ca-certificates,initscripts,adduser excalibur chroot https://pkgmaster.devuan.org/merged
-  else
+  # Debian trixie for both images. The one without systemd used to be Devuan
+  # excalibur; it is now Debian with Debian's own sysvinit-core, which trixie
+  # still ships, so the init choice is made after debootstrap rather than by
+  # picking a different distribution.
   debootstrap --arch=$ARCH --variant=minbase --include=curl,apt-transport-https,ca-certificates,initscripts,adduser trixie chroot https://deb.debian.org/debian/
-  fi
   ret=$?
   [ $ret -eq 0 ] && break
 done
@@ -456,22 +456,11 @@ echo "APT::Install-Recommends "false"; APT::Install-Suggests "false";" > /etc/ap
 echo "Acquire::Check-Valid-Until "0";" >> /etc/apt/apt.conf
 echo "APT::Get::Allow-Downgrades "true";" >> /etc/apt/apt.conf
 
-# systemd or not
-if [ "$SYSTEMD" = "FALSE" ]; then  # no systemd, add devuan repo
-export DEVUANREPO="deb https://pkgmaster.devuan.org/devuan/ excalibur main contrib non-free"
-echo 'Package: *
-Pin: release n=excalibur
-Pin-Priority: 1000
-
-Package: slim
-Pin: version 1:1.4.1-1devuan1
-Pin-Priority: 1001
-
-' > /etc/apt/preferences.d/99devuan
-
-elif [ "$SYSTEMD" = "TRUE" ]; then
-DEVUANREPO=""  # with systemd, no devuan repo added
-fi
+# No Devuan archive for either image. What keeps systemd out of the sysvinit
+# image is the 00systemd pin shipped in the overlay, which names the init
+# packages explicitly - libsystemd0 is just a library that most of the desktop
+# links against and must stay installable.
+DEVUANREPO=""
 
 # repos for 64-bit
 export REPOS64='deb [signed-by=/etc/apt/trusted.gpg.d/debdog.gpg] https://fred181.gitlab.io/trixie/amd64/ ./
@@ -538,16 +527,6 @@ else
 XLIBRE_KEY_OK="yes"
 fi
 if [ "$XLIBRE_KEY_OK" ]; then
-if [ "$SYSTEMD" = "FALSE" ]; then
-echo 'Types: deb deb-src
-URIs: https://xlibre-deb.github.io/devuan/
-Suites: excalibur
-Components: main
-Architectures: amd64
-Signed-By: /etc/apt/keyrings/xlibre-deb.asc
-' > /etc/apt/sources.list.d/xlibre-deb.sources
-
-else
 echo 'Types: deb deb-src
 URIs: https://xlibre-deb.github.io/debian/
 Suites: trixie
@@ -555,7 +534,6 @@ Components: main
 Architectures: amd64
 Signed-By: /etc/apt/keyrings/xlibre-deb.asc
 ' > /etc/apt/sources.list.d/xlibre-deb.sources
-fi
 fi
     fi
 #######################################################
@@ -597,7 +575,14 @@ apt-get install whiptail --yes
 # configure keyboard first
 if [ "$SYSTEMD" = "FALSE" ]; then
 echo -e "\e[0;36mInstall keyboard-configuration and more required packages\033[0m"
-apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration initscripts sysvinit-core xz-utils cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget devuan-keyring elogind libelogind0 libpam-elogind libelogind-compat udev --yes
+# debootstrap left systemd-sysv as init. sysvinit-core conflicts with it, so
+# installing one removes the other; elogind stands in for logind, and
+# libpam-elogind for libpam-systemd. The trailing "systemd-" removes the
+# systemd package itself in the same transaction rather than leaving it
+# installed but idle, and the 00systemd pin keeps it from coming back.
+# libelogind-compat is Devuan-only and not needed: on Debian libelogind0 and
+# libsystemd0 coexist.
+apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration initscripts sysvinit-core xz-utils cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget elogind libelogind0 libpam-elogind udev systemd- systemd-sysv- libpam-systemd- --yes
 
 else
 rm -f /etc/apt/preferences.d/00systemd
@@ -710,9 +695,9 @@ exit
   fi
 fi
 
-# in case udev installed, replace with eudev
+# Debian's udev runs fine under sysvinit; eudev was only needed on Devuan.
 if [ "$SYSTEMD" = "FALSE" ]; then
-apt-get install -y eudev porteusbootscripts
+apt-get install -y udev porteusbootscripts
 else
 apt-get install -y porteusbootscripts
 fi
