@@ -1,3 +1,10 @@
-Package: *systemd*
+# Keep systemd from being installed as init on the sysvinit image.
+#
+# Named packages, not a glob. This used to be "Package: *systemd*", which also
+# caught libsystemd0 - a plain library that most of the desktop links against,
+# with no bearing on which init runs. That was survivable on Devuan only
+# because libelogind-compat stood in for it; on Debian it makes the image
+# unbuildable. build-trixie removes this file for the systemd image.
+Package: systemd systemd-sysv libpam-systemd systemd-timesyncd systemd-resolved systemd-boot libnss-systemd systemd-container systemd-coredump
 Pin: origin ""
 Pin-Priority: -1
