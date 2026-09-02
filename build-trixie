@@ -23,9 +23,11 @@
 # 2026-08-08, initrd boot scripts (linuxrc, finit) are now kept as text in
 # ... 'initrd-src' and overlaid on the extracted skeleton, so changes to them are
 # ... reviewable; see initrd-src/MERGE-PLAN.md
+# 2026-08-08, Use https:// instead of http:// for the repositories in sources.list
+# ... ca-certificates and apt-transport-https are already installed by debootstrap
 
 # below uncommented will enable the snapshot repository, comment out to disable
-export SNAPSHOT="deb http://snapshot.debian.org/archive/debian/20240823 trixie main"
+export SNAPSHOT="deb https://snapshot.debian.org/archive/debian/20240823 trixie main"
 
 export LD_LIBRARY_PATH=
 
@@ -445,7 +447,7 @@ echo "APT::Get::Allow-Downgrades "true";" >> /etc/apt/apt.conf
 
 # systemd or not
 if [ "$SYSTEMD" = "FALSE" ]; then  # no systemd, add devuan repo
-export DEVUANREPO="deb http://pkgmaster.devuan.org/devuan/ excalibur main contrib non-free"
+export DEVUANREPO="deb https://pkgmaster.devuan.org/devuan/ excalibur main contrib non-free"
 echo 'Package: *
 Pin: release n=excalibur
 Pin-Priority: 1000
@@ -463,19 +465,19 @@ fi
 # repos for 64-bit
 export REPOS64='deb [signed-by=/etc/apt/trusted.gpg.d/debdog.gpg] https://fred181.gitlab.io/trixie/amd64/ ./
 ## package repositories
-deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
-#deb-src http://deb.debian.org/debian trixie main contrib non-free
+deb https://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+#deb-src https://deb.debian.org/debian trixie main contrib non-free
 
 '$DEVUANREPO'
 
-deb http://deb.debian.org/debian trixie-updates main contrib non-free
-#deb-src http://deb.debian.org/debian trixie-updates main contrib non-free
+deb https://deb.debian.org/debian trixie-updates main contrib non-free
+#deb-src https://deb.debian.org/debian trixie-updates main contrib non-free
 
-#deb http://deb.debian.org/debian trixie-proposed-updates main contrib non-free
-#deb-src http://deb.debian.org/debian trixie-proposed-updates main contrib non-free
+#deb https://deb.debian.org/debian trixie-proposed-updates main contrib non-free
+#deb-src https://deb.debian.org/debian trixie-proposed-updates main contrib non-free
 
-deb http://security.debian.org trixie-security main contrib non-free
-#deb-src http://security.debian.org trixie-security main contrib non-free
+deb https://security.debian.org trixie-security main contrib non-free
+#deb-src https://security.debian.org trixie-security main contrib non-free
 
 '$SNAPSHOT'
 
@@ -484,19 +486,19 @@ deb http://security.debian.org trixie-security main contrib non-free
 # repos for 32-bit
 export REPOS32='deb [signed-by=/etc/apt/trusted.gpg.d/debdog.gpg] https://fred181.gitlab.io/trixie/i386/ ./
 ## package repositories
-deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
-#deb-src http://deb.debian.org/debian trixie main contrib non-free
+deb https://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+#deb-src https://deb.debian.org/debian trixie main contrib non-free
 
 '$DEVUANREPO'
 
-deb http://deb.debian.org/debian trixie-updates main contrib non-free
-#deb-src http://deb.debian.org/debian trixie-updates main contrib non-free
+deb https://deb.debian.org/debian trixie-updates main contrib non-free
+#deb-src https://deb.debian.org/debian trixie-updates main contrib non-free
 
-#deb http://deb.debian.org/debian trixie-proposed-updates main contrib non-free
-#deb-src http://deb.debian.org/debian trixie-proposed-updates main contrib non-free
+#deb https://deb.debian.org/debian trixie-proposed-updates main contrib non-free
+#deb-src https://deb.debian.org/debian trixie-proposed-updates main contrib non-free
 
-deb http://security.debian.org trixie-security main contrib non-free
-#deb-src http://security.debian.org trixie-security main contrib non-free
+deb https://security.debian.org trixie-security main contrib non-free
+#deb-src https://security.debian.org trixie-security main contrib non-free
 
 '$SNAPSHOT'
 
