@@ -83,54 +83,20 @@ KNOWN_CHANGED="
 /usr/share/pixmaps/debian-logo.png
 /usr/share/icons/hicolor/icon-theme.cache
 "
-# Not expected, and not accepted either - see the xfail below.
-STALE_KEYRINGS="
-/usr/share/keyrings/devuan-archive-keyring.pgp
-/usr/share/keyrings/devuan-keyring.pgp
-/usr/share/keyrings/devuan-removed-keys.pgp
-"
 CHANGED=$(awk '$1!="missing"{print $NF}' "$WORK/verify" | sort -u)
 UNEXPECTED_CHANGED=""
 for f in $CHANGED; do
-	echo "$KNOWN_CHANGED"   | grep -qx -- "$f" && continue
-	echo "$STALE_KEYRINGS"  | grep -qx -- "$f" && continue
+	echo "$KNOWN_CHANGED" | grep -qx -- "$f" && continue
 	UNEXPECTED_CHANGED="$UNEXPECTED_CHANGED $f"
 done
+# The Devuan archive keyrings used to appear here. The dog-boot overlay carried
+# 2024 copies of devuan-archive-keyring, devuan-keyring and devuan-removed-keys,
+# and `cp -af ../dog-boot-trixie-20240602/* chroot/` wrote them through the
+# .gpg -> .pgp symlinks over the files the devuan-keyring package installed -
+# leaving the image verifying Devuan signatures against six keys where the
+# package ships eight. Those three overlay files are gone, so a keyring in this
+# list is now a real regression rather than a known one.
 assert_empty "no undocumented content change" "$(echo $UNEXPECTED_CHANGED)"
-
-echo "-- the Devuan archive keyrings are the ones their package installed"
-# They are not. build-trixie does
-#
-#     cp -af ../dog-boot-trixie-20240602/* chroot/
-#
-# and that overlay carries its own copies of these three keyrings from 2024.
-# /usr/share/keyrings/devuan-archive-keyring.gpg is a symlink to the .pgp, so
-# the copy writes *through* the symlink and silently replaces the file the
-# devuan-keyring package installed. The result has fewer keys than the package
-# ships - 6 against 8 in the archive keyring - so the image verifies Devuan
-# package signatures against a stale set of keys while dpkg believes the
-# current package is installed.
-#
-# Left as a marker rather than fixed here: removing three files from the
-# overlay changes what the build produces, and that is a decision about the
-# build, not about the test. Deleting them makes this XPASS and the marker has
-# to go with it.
-# True when the file is absent from the changed list, i.e. when it does match
-# what the package installed. Written as a function because the condition is
-# "not present", and an inline `grep -v` gets that backwards: grep -v succeeds
-# whenever *any* other line differs, so it is true no matter what.
-matches_package() { ! echo "$CHANGED" | grep -qx -- "$1"; }
-# Devuan images only. The Debian/systemd image has no devuan-keyring package
-# and no Devuan keyrings for the overlay to write over, so the marker has
-# nothing to describe there - and left unconditional it XPASSes, which reads as
-# "the bug is fixed" when the truth is "this image never had it".
-if [ "$(sed -n 's/^ID=//p' "$ROOT/etc/os-release" 2>/dev/null | tr -d '"')" = devuan ]; then
-	for f in $STALE_KEYRINGS; do
-		xfail "$(basename "$f") matches devuan-keyring" matches_package "$f"
-	done
-else
-	echo "   (not a Devuan image - the keyring overwrite does not apply)"
-fi
 
 echo "-- and the list of expected changes has not gone stale"
 for f in $KNOWN_CHANGED; do
