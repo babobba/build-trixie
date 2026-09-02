@@ -1,0 +1,66 @@
+#!/usr/bin/expect -f
+# Run build-trixie without a person at the keyboard.
+#
+#     tools/build-unattended configs-trixie/default.conf [gzip|xz|zstd]
+#
+# build-trixie stops for input in several places: a confirmation before wiping
+# the work directory, passwd for root and for the live user, a "press ENTER"
+# pause before compression, and the compressor choice. Two things make this
+# harder than piping answers in:
+#
+#   - it checks `tty -s` and exits 0 - not an error - when there is no
+#     controlling terminal, so a plain background run produces a three-line
+#     log that looks like a clean success;
+#   - passwd flushes the terminal's input queue before it prompts, so answers
+#     supplied in advance are discarded. They have to be typed after the prompt
+#     appears, which is what expect is for.
+#
+# Passwords default to the ones the project's documentation uses. Override with
+# ROOT_PASSWORD and USER_PASSWORD in the environment.
+#
+# The compressor prompt has had two wordings - "Type gzip or xz :" and, since
+# zstd was added, "Type gzip, xz or zstd :". Both are matched; a driver that
+# knew only one of them sat at the prompt for an hour once.
+
+set timeout 3600
+log_user 1
+
+if {[llength $argv] < 1} {
+    puts stderr "usage: build-unattended <config> \[gzip|xz|zstd\]"
+    exit 2
+}
+set conf [lindex $argv 0]
+set comp gzip
+if {[llength $argv] >= 2} { set comp [lindex $argv 1] }
+set rootpw "toor"
+set userpw "puppy"
+if {[info exists env(ROOT_PASSWORD)]} { set rootpw $env(ROOT_PASSWORD) }
+if {[info exists env(USER_PASSWORD)]} { set userpw $env(USER_PASSWORD) }
+
+# passwd asks for root first and the live user second; the same "New password"
+# prompt serves both, so count which one this is.
+set pwcount 0
+
+spawn ./build-trixie $conf
+expect {
+    -re "delete contents of directory trixie.*\\?" { send "\r"; exp_continue }
+    "New password:" {
+        if {$pwcount < 2} { send "$rootpw\r" } else { send "$userpw\r" }
+        incr pwcount
+        exp_continue
+    }
+    "Retype new password:" {
+        if {$pwcount <= 2} { send "$rootpw\r" } else { send "$userpw\r" }
+        exp_continue
+    }
+    "Press ENTER to continue"                      { send "\r"; exp_continue }
+    "then press ENTER to continue"                 { send "\r"; exp_continue }
+    -re "Type gzip(, xz or zstd| or xz) :"         { send "$comp\r"; exp_continue }
+    "This config file cannot be used"              { puts stderr "config rejected"; exit 1 }
+    eof                                            { }
+    timeout                                        { puts stderr "TIMED OUT waiting for build-trixie"; exit 1 }
+}
+catch wait result
+set rc [lindex $result 3]
+if {$rc != 0} { puts stderr "build-trixie exited $rc" }
+exit $rc
