@@ -110,7 +110,15 @@ read UP _ < /proc/uptime; echo "PROF $UP xsession: strace starts openbox-session
 exec env LD_LIBRARY_PATH=/opt/strace /opt/strace/strace -f -tt -e trace=execve,connect,openat -o /tmp/session.strace openbox-session
 XS
 		chmod +x "$RC/root/.xsession"
-		echo "   strace mode: the X session runs under $(strace -V | head -1)"
+		# The X server as well, execve only: a client that goes quiet for
+		# seconds is usually waiting on the server, and what the server runs
+		# (xkbcomp, above all) is the tell. xinit honours ~/.xserverrc.
+		cat > "$RC/root/.xserverrc" <<'XSRV'
+#!/bin/sh
+exec env LD_LIBRARY_PATH=/opt/strace /opt/strace/strace -f -tt -e trace=execve -o /tmp/xorg.strace /usr/bin/X -nolisten tcp "$@"
+XSRV
+		chmod +x "$RC/root/.xserverrc"
+		echo "   strace mode: the X session and the X server run under $(strace -V | head -1)"
 	fi
 	grep -c '^PROF\|prof ' "$L" >/dev/null || bt_fail "instrumentation did not apply"
 	bt_initrd_pack "$P" "$IRD_FMT" > "$WORK/iso/live/initrd1.xz" || bt_fail "could not repack the instrumented initrd"
@@ -141,9 +149,11 @@ done
 echo "---why ldconfig ran (it is on the critical chain)---"
 ls -la /etc/.updated /var/.updated 2>&1 | sed 's/^/  /'
 systemctl show ldconfig.service -p ConditionResult -p ExecMainStartTimestampMonotonic -p ExecMainExitTimestampMonotonic 2>/dev/null | sed 's/^/  /'
-echo "---networking.service (gates network-online, which gates rc.local, which gates getty)---"
-grep -vE '^\s*#|^\s*$' /etc/network/interfaces 2>/dev/null | sed 's/^/  /'
-journalctl -b -u networking --no-pager -o short-monotonic 2>/dev/null | head -8 | cut -c1-120 | sed 's/^/  /'
+echo "---networking.service (network.target gates systemd-user-sessions, which gates getty)---"
+grep -vE '^\s*#|^\s*$' /etc/network/interfaces /etc/network/interfaces.d/* 2>/dev/null | sed 's/^/  /'
+echo "  ifquery lists: '$(ifquery --read-environment --list --exclude=lo 2>/dev/null | tr '\n' ' ')'"
+journalctl -b -u ifupdown-pre -u networking --no-pager -o short-monotonic 2>/dev/null | head -12 | cut -c1-140 | sed 's/^/  /'
+systemctl show networking.service -p ExecMainStartTimestampMonotonic -p ExecMainExitTimestampMonotonic -p ExecStartPre 2>/dev/null | cut -c1-200 | sed 's/^/  /'
 systemctl cat rc-local.service 2>/dev/null | grep -E '^(After|Before|Wants)=' | sed 's/^/  rc-local: /'
 systemctl cat getty.target 2>/dev/null | grep -E '^(After|Before|Wants)=' | sed 's/^/  getty.target: /'
 echo "---font caches (built at first start if absent from the image)---"
@@ -155,6 +165,11 @@ if [ -s /tmp/session.strace ]; then
 	awk '{ split($2,t,":"); s=t[1]*3600+t[2]*60+t[3]; if (p!="" && s-p>0.3) printf "  +%5.2fs pid %s  %s\n", s-p, $1, substr(prev,1,120); p=s; prev=$0 }' /tmp/session.strace | sort -rn | head -12
 	# openbox itself, from its execve to the moment it spawns the autostart:
 	# what it opened, second by second, and the longest waits inside it.
+	if [ -s /tmp/xorg.strace ]; then
+		echo "---the X server: every program it ran, with the time each took (strace -f, execve only)---"
+		grep -a 'execve(' /tmp/xorg.strace | grep -v ENOENT | sed -E 's/^([0-9]+) +([0-9:.]+) execve\("([^"]*)", \[([^]]*)\].*/\2 pid \1 \3 [\4]/' | cut -c1-150 | sed 's/^/  /' | head -20
+		grep -aE 'execve\(|exited with' /tmp/xorg.strace | awk '{ split($2,t,":"); s=t[1]*3600+t[2]*60+t[3]; if ($3 ~ /^execve/) { st[$1]=s; match($0,/execve\("[^"]*"/); nm[$1]=substr($0,RSTART+8,RLENGTH-9) } else if ($1 in st) printf "  %6.2fs  %s (pid %s)\n", s-st[$1], nm[$1], $1 }' | sort -rn | head -8
+	fi
 	OBPID=$(grep -a 'execve("/usr/bin/openbox"' /tmp/session.strace | head -1 | cut -d' ' -f1)
 	ASPID=$(grep -a 'execve("/usr/lib/[^"]*/openbox-autostart"' /tmp/session.strace | head -1 | cut -d' ' -f1)
 	if [ -n "$OBPID" ]; then
