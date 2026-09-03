@@ -19,7 +19,11 @@
 [ $(pidof pcmanfm) ] && killall -9 pcmanfm
 pcmanfm --desktop &
 lxpanel &
-sleep 8
+# conky and volumeicon draw over the desktop that pcmanfm provides, so they
+# must start after its window exists. This used to be a fixed sleep (8 seconds
+# for root, 1 for other users) that was too long on a fast machine and too
+# short on a slow one; now it is the actual condition, bounded at 10 seconds.
+n=0; until xdotool search --classname pcmanfm >/dev/null 2>&1 || [ $n -ge 50 ]; do sleep 0.2; n=$((n+1)); done
 
 if [ -f /mnt/live/tmp/modules ]; then
 conky -c ~/.conkyrc-port &
