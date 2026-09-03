@@ -83,6 +83,7 @@ copy_including_deps /$LMK/kernel/fs/nls/nls_utf8.*
 copy_including_deps /$LMK/kernel/fs/fuse
 copy_including_deps /$LMK/kernel/fs/isofs
 copy_including_deps /$LMK/kernel/fs/ntfs
+copy_including_deps /$LMK/kernel/fs/ntfs3
 copy_including_deps /$LMK/kernel/fs/reiserfs
 copy_including_deps /$LMK/kernel/fs/squashfs
 copy_including_deps /$LMK/kernel/crypto
@@ -160,14 +161,40 @@ copy_including_deps /$LMK/kernel/drivers/scsi/scsi_transport_srp.*	# PE2850 PERC
 copy_including_deps /$LMK/kernel/drivers/message/fusion/mptspi.*	# PE2850 LSI 53c1030
 copy_including_deps /$LMK/kernel/drivers/scsi/scsi_transport_spi.*	# PE2850 LSI 53c1030
 
-# network support drivers
-#if [ "$NETWORK" = "true" ]; then
-   # add all known ethernet drivers
+# Network drivers. They matter only to a PXE client, which mounts its live
+# directory over NFS from inside this initrd; everything else gets its NIC
+# driver from the real system's udev later. The whole ethernet tree is 25 MB
+# uncompressed and most of it is datacentre silicon (Mellanox, Chelsio,
+# Netronome, QLogic, Solarflare) that no live desktop will ever meet, and the
+# kernel spends most of its initramfs time decompressing it. So:
+#
+#   NETWORK=common   (default) the NICs found in desktops, laptops and VMs
+#   NETWORK=all      every ethernet driver, for a PXE fleet on odd hardware
+#   NETWORK=none     no NIC drivers and no NFS - the initrd cannot netboot
+NETWORK=${NETWORK:-common}
+case "$NETWORK" in
+all)
    copy_including_deps /$LMK/kernel/drivers/net/phy/broadcom.*
    copy_including_deps /$LMK/kernel/drivers/net/phy/realtek.*
    copy_including_deps /$LMK/kernel/drivers/net/ethernet
+   copy_including_deps /$LMK/kernel/drivers/net/usb
    copy_including_deps /$LMK/kernel/fs/nfs
-#fi
+   ;;
+common)
+   copy_including_deps /$LMK/kernel/drivers/net/phy/broadcom.*
+   copy_including_deps /$LMK/kernel/drivers/net/phy/realtek.*
+   for d in intel/e100 intel/e1000 intel/e1000e intel/igb intel/igc realtek \
+            broadcom/tg3.* broadcom/b44.* broadcom/bnx2.* marvell/sky2.* marvell/skge.* \
+            nvidia atheros aquantia amd/pcnet32.* 8390/ne2k-pci.* 8390/8390.* \
+            via dlink sis; do
+      copy_including_deps /$LMK/kernel/drivers/net/ethernet/$d
+   done
+   copy_including_deps /$LMK/kernel/drivers/net/usb
+   copy_including_deps /$LMK/kernel/fs/nfs
+   ;;
+none) ;;
+*) echo "mkinitrd: NETWORK=$NETWORK is not one of common, all, none" >&2; exit 1 ;;
+esac
 
 # Copy all from modlist in initramfs directory
 #while IFS= read line; do
@@ -201,8 +228,37 @@ modprobe -S $kernel -d $INITRAMFS -Dq $m | grep -v builtin > /dev/null 2> /dev/n
 done
 rm $INITRAMFS/modlist.tmp
 
+## Prebuild busybox modprobe's index. The initrd's modprobe is the "small"
+## variant: it does not read modules.dep, it scans every module for aliases
+## and dependencies the first time it runs and there is no modules.dep.bb,
+## and with a few hundred modules that scan is the slowest single step of the
+## boot. Running the initrd's own busybox once, chrooted into the tree, writes
+## the index now. modprobe looks under the running kernel's name, so the
+## target's directory is linked under that name for the duration. The load
+## itself fails (wrong kernel, or no permission) and that is fine.
+if [ -x $INITRAMFS/bin/busybox ]; then
+   RK=$(uname -r)
+   [ "$RK" != "$kernel" ] && ln -s $kernel $INITRAMFS/lib/modules/$RK
+   # A name that resolves straight away ends the scan early and writes no
+   # index; only a full scan - a name that is not there - does.
+   chroot $INITRAMFS /bin/busybox modprobe -q no_such_module_build_index >/dev/null 2>&1
+   [ "$RK" != "$kernel" ] && rm -f $INITRAMFS/lib/modules/$RK
+   [ -s $INITRAMFS/$LMK/modules.dep.bb ] && echo "modprobe index prebuilt" \
+      || echo "WARNING: modprobe index not built - every boot will scan the modules"
+fi
+
 cd $INITRAMFS
-find . -print | cpio -o -H newc 2>/dev/null | xz -f --extreme --check=crc32 > /tmp/initrd1.xz
+## zstd when it is there: the kernel unpacks it about five times faster than
+## xz for a file about a tenth larger (CONFIG_RD_ZSTD). The file keeps its
+## name - initrd1.xz is how every bootloader config refers to it and how
+## linuxrc recognises a boot medium - so the suffix says where it came from,
+## not what it is; the kernel does not care.
+if command -v zstd >/dev/null 2>&1; then
+   find . -print | cpio -o -H newc 2>/dev/null | zstd -q -19 -T0 > /tmp/initrd1.xz
+else
+   echo "zstd not installed - falling back to xz, which the kernel unpacks more slowly"
+   find . -print | cpio -o -H newc 2>/dev/null | xz -f --extreme --check=crc32 > /tmp/initrd1.xz
+fi
 
 echo "Done ! /tmp/initrd1.xz"
 rm -fr $INITRAMFS
