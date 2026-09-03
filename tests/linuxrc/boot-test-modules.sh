@@ -33,7 +33,9 @@ bt_check "the system booted at all" '===CLI-END==='
 sed -n '/===CLI-MARKER===/,/===CLI-END===/p' "$SER.clean" | sed 's/^/   | /'
 echo "-- the module is loaded"
 bt_check "more than the base and kernel squashfs are mounted" '^SQFS=[3-9]'
-bt_check "the firefox module is among the images"        '^MODULES=.*firefox'
+# finit shortens mount names under /mnt/live/memory/images to nine
+# characters plus a counter, so the module shows up as 05-firefo-2.squashfs.
+bt_check "the firefox module is among the images"        '^MODULES=.*05-firefo'
 echo "-- and what it carries works"
 bt_check "the firefox binary is there"                   '^FIREFOX_BIN=PRESENT$'
 bt_check "its menu entry is there"                       '^FIREFOX_DESKTOP=PRESENT$'
