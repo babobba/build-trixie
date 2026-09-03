@@ -29,9 +29,17 @@ CODES="${CODES:-login=root}"
 PROF_FN='prof() { read _up _ < /proc/uptime; echo "PROF $_up $*"; }'
 
 bt_extra_setup() {
+	# PROF_ROOTCOPY=<dir>: a tree copied over the union at boot through the
+	# medium's rootcopy directory, the way the initrd has always offered.
+	# This is how a change to the rootfs - a script under /etc, a systemd
+	# drop-in - is measured before the hour-long rebuild that ships it.
+	if [ -n "${PROF_ROOTCOPY:-}" ]; then
+		[ -d "$PROF_ROOTCOPY" ] || bt_fail "PROF_ROOTCOPY=$PROF_ROOTCOPY is not a directory"
+		cp -a "$PROF_ROOTCOPY"/. "$WORK/iso/live/rootcopy/"
+		echo "   rootcopy: $(cd "$PROF_ROOTCOPY" && find . -type f | sed 's|^\./||' | tr '\n' ' ')"
+	fi
 	P="$WORK/prof-ird"; rm -rf "$P"; mkdir -p "$P"
-	( cd "$P" && xz -dc "$WORK/iso/live/initrd1.xz" | cpio -idm --quiet 2>/dev/null ) \
-		|| bt_fail "could not unpack the repacked initrd"
+	bt_initrd_unpack "$WORK/iso/live/initrd1.xz" "$P" || bt_fail "could not unpack the repacked initrd"
 	L="$P/linuxrc"
 	# Define prof right after printk is silenced (/proc is mounted by then).
 	sed -i "s|^echo 0 >/proc/sys/kernel/printk\$|&\n$PROF_FN\nprof 'linuxrc started'|" "$L"
@@ -63,18 +71,41 @@ bt_extra_setup() {
 			|| bt_fail "could not extract /etc/profile and the autostart from the squashfs"
 		GPROF='prof() { read _up _ < /proc/uptime; echo "PROF $_up $*" > /dev/ttyS0; }'
 		mkdir -p "$RC/etc" "$RC/root/.config/openbox"
-		{ echo "$GPROF"; sed 's/^sleep 3$/prof "profile: sleep 3 before startx"; sleep 3; prof "profile: startx"/' "$X/etc/profile"; } > "$RC/etc/profile"
+		# A rootcopy that already carries these files is the version under test.
+		[ -f "$RC/etc/profile" ] && cp -f "$RC/etc/profile" "$X/etc/profile"
+		[ -f "$RC/root/.config/openbox/autostart" ] && cp -f "$RC/root/.config/openbox/autostart" "$X/root/.config/openbox/autostart"
+		{ echo "$GPROF"; sed -e 's/^sleep 3$/prof "profile: sleep 3 before startx"; sleep 3/' \
+		                     -e 's/^startx$/prof "profile: startx"; startx/' "$X/etc/profile"; } > "$RC/etc/profile"
 		{ echo '#!/bin/sh'; echo "$GPROF"; echo 'prof "autostart: begin"'
 		  sed -e 's/^pcmanfm --desktop &$/prof "autostart: pcmanfm+lxpanel"; &/' \
 		      -e 's/^sleep 8$/prof "autostart: sleep 8"; sleep 8; prof "autostart: after sleep"/' \
+		      -e 's/^\(n=0; until xdotool .*\)$/prof "autostart: waiting for the desktop window"; \1; prof "autostart: desktop window is up"/' \
 		      -e 's/^volumeicon &$/prof "autostart: volumeicon"; &/' "$X/root/.config/openbox/autostart"
 		  echo 'prof "autostart: end of the shipped script"'; } > "$RC/root/.config/openbox/autostart"
 		chmod 644 "$RC/etc/profile"; chmod 755 "$RC/root/.config/openbox/autostart"
 		echo "   fine mode: per-modprobe stamps, stamped /etc/profile and openbox autostart"
 	fi
+	# PROF_STRACE=1 traces the whole X session - openbox-session and every
+	# child - with strace, to attribute time that no script stamp can reach
+	# (what openbox itself does between starting and running its autostart).
+	# The guest has no strace, so the host's is carried in with the libraries
+	# it needs and run from /opt/strace; ~/.xsession is where Debian's Xsession
+	# lets a user take over the session, and it is used for exactly that.
+	if [ "${PROF_STRACE:-0}" = 1 ]; then
+		command -v strace >/dev/null || bt_fail "PROF_STRACE needs strace on the host"
+		RC="$WORK/iso/live/rootcopy"; mkdir -p "$RC/opt/strace" "$RC/root"
+		cp -L "$(command -v strace)" "$RC/opt/strace/strace"
+		for lib in $(ldd "$(command -v strace)" | awk '/=> \//{print $3}' | grep -v 'libc\.so'); do cp -L "$lib" "$RC/opt/strace/"; done
+		cat > "$RC/root/.xsession" <<'XS'
+#!/bin/sh
+read UP _ < /proc/uptime; echo "PROF $UP xsession: strace starts openbox-session" > /dev/ttyS0
+exec env LD_LIBRARY_PATH=/opt/strace /opt/strace/strace -f -tt -e trace=execve,connect,openat -o /tmp/session.strace openbox-session
+XS
+		chmod +x "$RC/root/.xsession"
+		echo "   strace mode: the X session runs under $(strace -V | head -1)"
+	fi
 	grep -c '^PROF\|prof ' "$L" >/dev/null || bt_fail "instrumentation did not apply"
-	( cd "$P" && find . | cpio -o -H newc --quiet 2>/dev/null | xz -f --check=crc32 ) \
-		> "$WORK/iso/live/initrd1.xz" || bt_fail "could not repack the instrumented initrd"
+	bt_initrd_pack "$P" "$IRD_FMT" > "$WORK/iso/live/initrd1.xz" || bt_fail "could not repack the instrumented initrd"
 	echo "   instrumented linuxrc: $(grep -c 'prof ' "$L") stamps, finit: $(grep -c 'prof ' "$F" 2>/dev/null || echo 0)"
 
 	# The desktop-side report. Written over the stock rgui: the analysis goes
@@ -110,6 +141,11 @@ systemctl cat getty.target 2>/dev/null | grep -E '^(After|Before|Wants)=' | sed 
 echo "---font caches (built at first start if absent from the image)---"
 ls -la --time-style=+%T /var/cache/fontconfig 2>/dev/null | head -4 | sed 's/^/  /'; ls -la --time-style=+%T /root/.cache/fontconfig 2>/dev/null | head -4 | sed 's/^/  /'
 echo "  now: $(date +%T)"
+if [ -s /tmp/session.strace ]; then
+	echo "---strace of the X session: every execve, then the 12 longest gaps (pid, gap, the line before the gap)---"
+	grep -a 'execve(' /tmp/session.strace | grep -v ENOENT | sed -E 's/^([0-9]+) ([0-9:.]+) execve\("([^"]*)".*/  \2 pid \1 \3/' | head -40
+	awk '{ split($2,t,":"); s=t[1]*3600+t[2]*60+t[3]; if (p!="" && s-p>0.3) printf "  +%5.2fs pid %s  %s\n", s-p, $1, substr(prev,1,120); p=s; prev=$0 }' /tmp/session.strace | sort -rn | head -12
+fi
 echo "---kernel modules loaded now (initrd ships 360)---"
 echo "  $(lsmod | awk 'NR>1' | wc -l) loaded: $(lsmod | awk 'NR>1{print $1}' | sort | tr '\n' ' ')"
 echo "===GUI-END==="

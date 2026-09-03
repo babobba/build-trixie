@@ -63,7 +63,12 @@ unpack_initrd() {
 	[ -f "$ISODATA/live/initrd1.xz" ] || return 1
 	command -v cpio >/dev/null || return 1
 	mkdir -p "$IRD"
-	( cd "$IRD" && xz -dc "$ISODATA/live/initrd1.xz" \
+	# xz or zstd, under the same name; the kernel accepts both.
+	case "$(od -An -tx1 -N4 "$ISODATA/live/initrd1.xz" | tr -d ' \n')" in
+		28b52ffd) DC="zstd -dc" ;;
+		*)        DC="xz -dc" ;;
+	esac
+	( cd "$IRD" && $DC "$ISODATA/live/initrd1.xz" \
 		| cpio -idm --quiet linuxrc finit 2>/dev/null )
 	[ -f "$IRD/linuxrc" ] || return 1
 	echo "$IRD"
