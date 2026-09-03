@@ -57,7 +57,10 @@ assert_equal "the tolerated state is only 'deinstall ok config-files'" "" \
 echo "-- deleted files are only in the trees the build strips"
 # The build removes documentation, manual pages, locales and info files. Those
 # deletions are expected; a deletion anywhere else is not.
-STRIPPED='^/usr/share/(doc|doc-base|man|info|locale|help|gnome/help)/'
+# The udev vendor-name tables (20-OUI, 20-pci-vendor-model, 20-usb-vendor-model
+# and friends) are deleted as well and hwdb.bin rebuilt without them; that
+# file is generated, not shipped, so only the tables show up here.
+STRIPPED='^/usr/share/(doc|doc-base|man|info|locale|help|gnome/help)/|^/usr/lib/udev/hwdb\.d/20-(OUI|pci-vendor-model|usb-vendor-model|bluetooth-vendor-product|acpi-vendor)\.hwdb$'
 UNEXPECTED_MISSING=$(awk '$1=="missing"{print $NF}' "$WORK/verify" \
 	| grep -Ev "$STRIPPED" | sort -u)
 NMISS=$(awk '$1=="missing"' "$WORK/verify" | wc -l | tr -d ' ')

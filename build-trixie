@@ -915,6 +915,62 @@ chroot chroot /usr/lib/systemd/systemd-update-done
 ok_or_failed
 fi
 
+# udev's hardware database: 13 MB of hwdb.bin, most of it the PCI, USB and
+# OUI vendor-name tables that only decorate device properties with a maker's
+# name - pciutils and usbutils carry their own ids for lspci and lsusb. The
+# tables that change behaviour (keyboard, evdev, sensor, mouse, touchpad,
+# joystick and the rest of 60- and 70-) stay. Rebuilt with udevadm, which
+# both the systemd and the sysvinit image have.
+echo -e "\e[0;36mTrimming udev's hardware database to the input tables\033[0m"
+rm -f chroot/usr/lib/udev/hwdb.d/20-OUI.hwdb chroot/usr/lib/udev/hwdb.d/20-pci-vendor-model.hwdb \
+      chroot/usr/lib/udev/hwdb.d/20-usb-vendor-model.hwdb chroot/usr/lib/udev/hwdb.d/20-bluetooth-vendor-product.hwdb \
+      chroot/usr/lib/udev/hwdb.d/20-acpi-vendor.hwdb
+chroot chroot udevadm hwdb --update
+ok_or_failed
+
+# Packages split out of the base squashfs into modules of their own
+# (MODULE_PACKAGES in the config; Firefox in the default configs, 81 MB of a
+# 287 MB base). Each becomes isodata/live/05-<package>.squashfs, which linuxrc
+# loads alongside 01-filesystem.squashfs unless base_only is on the boot
+# line, so the desktop is the same; what changes is that the base is smaller
+# and a module can be left off a medium. The module carries the package's
+# files, its dpkg info files, the alternatives it registered (a browser owns
+# x-www-browser), and its status entry under the name apt2sfs uses for a
+# module's own entries, statusnew - dpkg on the running system does not see
+# modules, the same as for every module made with the dog tools, and a
+# remaster folds them back in. The package is then purged from the base; its
+# dependencies stay, because the module needs them.
+MODULE_PACKAGES=${MODULE_PACKAGES:-}
+rm -rf modstage
+for pkg in $MODULE_PACKAGES; do
+if ! chroot chroot dpkg -s $pkg >/dev/null 2>&1; then echo -e "\e[0;31mMODULE_PACKAGES: $pkg is not installed, not split\033[0m"; continue; fi
+echo -e "\e[0;36mSplitting $pkg out of the base into a module of its own\033[0m"
+M=modstage/$pkg; mkdir -p $M/var/lib/dpkg/info
+# files and symlinks only: a directory in the list would be copied whole
+chroot chroot dpkg -L $pkg | while read f; do { [ -f "chroot$f" ] || [ -L "chroot$f" ]; } && echo "${f#/}"; done > modstage/$pkg.files
+# rsync recreates the parent directories with their own modes; a parent made
+# with a default mode would take over the union's /usr when the module is on top
+rsync -a --files-from=modstage/$pkg.files chroot/ $M/
+cp -a chroot/var/lib/dpkg/info/$pkg.* $M/var/lib/dpkg/info/
+for db in chroot/var/lib/dpkg/alternatives/*; do
+  grep -q "^/usr/bin/$pkg\$\|^/usr/lib/$pkg/" "$db" || continue
+  name=$(basename $db); master=$(sed -n 2p $db)
+  ( cd chroot && rsync -a --files-from=<(printf '%s\n' var/lib/dpkg/alternatives/$name etc/alternatives/$name ${master#/}) ./ ../$M/ )
+done
+awk -v p="$pkg" 'BEGIN{RS="";ORS="\n\n"} $1=="Package:" && $2==p' chroot/var/lib/dpkg/status > $M/var/lib/dpkg/statusnew
+chroot chroot dpkg --purge --force-depends $pkg
+echo "$pkg: $(wc -l < modstage/$pkg.files) files staged, $(du -sm $M | cut -f1) MB"
+ok_or_failed
+done
+squash_modules() {   # the compressor options the base got
+for d in modstage/*/; do
+[ -d "$d" ] || continue
+pkg=$(basename $d)
+echo -e "\e[0;36mCreating isodata/live/05-$pkg.squashfs . . .\033[0m"
+mksquashfs $d isodata/live/05-$pkg.squashfs "$@"
+done
+}
+
 # Allow the user to makes changes in chroot just before creating filesystem.squashfs 
 echo "At this point you may want to add/edit/delete files in chroot folder"
 echo "Also you can add .squashfs modules in the isodata/live folder, to be included in the ISO"
@@ -932,18 +988,21 @@ echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs
 mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs
 echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
 mksquashfs chroot isodata/live/01-filesystem.squashfs
+squash_modules
 ;;
   xz)
 echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs . . .\033[0m"
 mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp xz -b 512k -Xbcj x86
 echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
 mksquashfs chroot isodata/live/01-filesystem.squashfs -comp xz -b 512k -Xbcj x86
+squash_modules -comp xz -b 512k -Xbcj x86
 ;;
   zstd)
 echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs . . .\033[0m"
-mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp zstd -Xcompression-level 19 -b 512k
+mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp zstd -Xcompression-level 19 -b 1M
 echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
-mksquashfs chroot isodata/live/01-filesystem.squashfs -comp zstd -Xcompression-level 19 -b 512k
+mksquashfs chroot isodata/live/01-filesystem.squashfs -comp zstd -Xcompression-level 19 -b 1M
+squash_modules -comp zstd -Xcompression-level 19 -b 1M
 ;;
 *)
 echo -e "\e[0;31mNot a valid choice, please try again, type: gzip, xz or zstd \033[0m"
@@ -962,18 +1021,21 @@ echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs
 mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs
 echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
 mksquashfs chroot isodata/live/01-filesystem.squashfs
+squash_modules
 ;;
   xz)
 echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs . . .\033[0m"
 mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp xz -b 512k -Xbcj x86
 echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
 mksquashfs chroot isodata/live/01-filesystem.squashfs -comp xz -b 512k -Xbcj x86
+squash_modules -comp xz -b 512k -Xbcj x86
 ;;
   zstd)
 echo -e "\e[0;36mCreating kernel .squashfs isodata/live/k-$kernel${nmu}.squashfs . . .\033[0m"
-mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp zstd -Xcompression-level 19 -b 512k
+mksquashfs $kernel isodata/live/k-$kernel${nmu}.squashfs -comp zstd -Xcompression-level 19 -b 1M
 echo -e "\e[0;36mCreating isodata/live/01-filesystem.squashfs...\033[0m"
-mksquashfs chroot isodata/live/01-filesystem.squashfs -comp zstd -Xcompression-level 19 -b 512k
+mksquashfs chroot isodata/live/01-filesystem.squashfs -comp zstd -Xcompression-level 19 -b 1M
+squash_modules -comp zstd -Xcompression-level 19 -b 1M
 ;;
 *)
 echo -e "\e[0;31mNot a valid choice, exiting now... \033[0m"

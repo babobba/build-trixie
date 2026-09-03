@@ -30,6 +30,10 @@ MON=/tmp/lbt-$NAME.sock          # QEMU rejects socket paths over 107 bytes
 CODES=${CODES:-}
 REPORT=${REPORT:-}
 SCRATCH=${SCRATCH:-0}
+# base_only keeps every test to the base squashfs, so a module on the medium
+# cannot mask a regression in the base; BASE_ONLY=0 is for the one test whose
+# subject is the modules themselves.
+BASE_ONLY=${BASE_ONLY:-1}
 bt_pass=0; bt_bad=0
 
 bt_fail() { echo "FAIL: $*"; exit 1; }
@@ -168,7 +172,7 @@ bt_build() {
 label BOOT-TEST
 menu default
 kernel /live/vmlinuz1
-append initrd=/live/initrd1.xz console=ttyS0,115200 from=/ base_only $CODES cliexec=/usr/local/bin/rcli guiexec=/usr/local/bin/rgui
+append initrd=/live/initrd1.xz console=ttyS0,115200 from=/ $([ "$BASE_ONLY" = 1 ] && echo base_only) $CODES cliexec=/usr/local/bin/rcli guiexec=/usr/local/bin/rgui
 EOF
 
 	( cd "$WORK/iso" && xorriso -as mkisofs -r -J -joliet-long -l \
