@@ -41,9 +41,13 @@ if [ -d /etc/profile.d ]; then
   unset i
 fi
 
+# startx straight away. There used to be a three-second sleep here, from the
+# days when the tty1 login could race the rc scripts; under systemd getty@tty1
+# is ordered after rc-local.service, and under sysvinit the runlevel's "wait"
+# entries finish before its "respawn" ones start, so nothing is left to wait
+# for on either.
 if [ -z "${DISPLAY}" ] && [ $(tty) = /dev/tty1 ]
 then
-sleep 3
 startx
 fi
 
