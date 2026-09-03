@@ -36,6 +36,11 @@ bt_extra_setup() {
 	if [ -n "${PROF_ROOTCOPY:-}" ]; then
 		[ -d "$PROF_ROOTCOPY" ] || bt_fail "PROF_ROOTCOPY=$PROF_ROOTCOPY is not a directory"
 		cp -a "$PROF_ROOTCOPY"/. "$WORK/iso/live/rootcopy/"
+		# The initrd copies rootcopy with cp -a, which gives /usr the mtime of
+		# rootcopy/usr - newer than any update-done stamp the tree carries, so
+		# ldconfig would run and the stamp would look broken. Make the stamps
+		# the newest thing on the medium.
+		for f in etc/.updated var/.updated; do [ -f "$WORK/iso/live/rootcopy/$f" ] && touch "$WORK/iso/live/rootcopy/$f"; done
 		echo "   rootcopy: $(cd "$PROF_ROOTCOPY" && find . -type f | sed 's|^\./||' | tr '\n' ' ')"
 	fi
 	P="$WORK/prof-ird"; rm -rf "$P"; mkdir -p "$P"
@@ -64,7 +69,10 @@ bt_extra_setup() {
 	# autostart are taken from the image so the stamped copies differ from the
 	# shipped ones only by the stamps.
 	if [ "${PROF_FINE:-0}" = 1 ]; then
-		sed -i 's/^modprobe \$MODULE 2> \/dev\/null$/prof "modprobe $MODULE"; &/' "$L"
+		# the base list, one stamp per module, and the modalias passes, with
+		# how many aliases each one tried
+		sed -i 's/for MODULE in \$(cat modlist); do modprobe \$MODULE 2>\/dev\/null; done/for MODULE in $(cat modlist); do prof "modprobe $MODULE"; modprobe $MODULE 2>\/dev\/null; done; prof "modlist done"/' "$L"
+		sed -i 's/^    for M in `cat \/tmp\/modalias.\$1.hit`; do modprobe "\$M" 2>\/dev\/null; done$/    prof "modalias pass $1: $(sed -n \x27$=\x27 \/tmp\/modalias.$1) aliases seen, $(sed -n \x27$=\x27 \/tmp\/modalias.$1.hit) claimed by a driver: $(tr \x27\\n\x27 \x27 \x27 < \/tmp\/modalias.$1.hit)"\n&\n    prof "modalias pass $1 done"/' "$L"
 		RC="$WORK/iso/live/rootcopy"; X="$WORK/sqx"; rm -rf "$X"
 		unsquashfs -q -f -d "$X" "$ISODATA/live/01-filesystem.squashfs" \
 			etc/profile root/.config/openbox/autostart >/dev/null 2>&1 \
@@ -145,6 +153,17 @@ if [ -s /tmp/session.strace ]; then
 	echo "---strace of the X session: every execve, then the 12 longest gaps (pid, gap, the line before the gap)---"
 	grep -a 'execve(' /tmp/session.strace | grep -v ENOENT | sed -E 's/^([0-9]+) ([0-9:.]+) execve\("([^"]*)".*/  \2 pid \1 \3/' | head -40
 	awk '{ split($2,t,":"); s=t[1]*3600+t[2]*60+t[3]; if (p!="" && s-p>0.3) printf "  +%5.2fs pid %s  %s\n", s-p, $1, substr(prev,1,120); p=s; prev=$0 }' /tmp/session.strace | sort -rn | head -12
+	# openbox itself, from its execve to the moment it spawns the autostart:
+	# what it opened, second by second, and the longest waits inside it.
+	OBPID=$(grep -a 'execve("/usr/bin/openbox"' /tmp/session.strace | head -1 | cut -d' ' -f1)
+	ASPID=$(grep -a 'execve("/usr/lib/[^"]*/openbox-autostart"' /tmp/session.strace | head -1 | cut -d' ' -f1)
+	if [ -n "$OBPID" ]; then
+		echo "---openbox (pid $OBPID) until it spawned the autostart (pid ${ASPID:-?}): opens per second by path prefix---"
+		awk -v ob="$OBPID" -v as="$ASPID" '$1==ob { if (index($0,"openbox-autostart")) exit; if ($3 ~ /^openat/) { split($2,t,":"); sec=int(t[1]*3600+t[2]*60+t[3]); match($0,/"[^"]*"/); path=substr($0,RSTART+1,RLENGTH-2); n=split(path,q,"/"); pre=(n>3)?"/"q[2]"/"q[3]"/"q[4]:path; c[sec" "pre]++ } }
+		     END { for (k in c) print k, c[k] }' /tmp/session.strace | sort -n | awk '{ if ($1!=last) { if (last!="") print line; line="  "$1"s:"; last=$1 } line=line" "$2"("$3")" } END { print line }' | sed 's/\([0-9]*\)s:/@\1/' | head -30
+		echo "---openbox: the 10 longest gaps between its own syscalls in that window---"
+		awk -v ob="$OBPID" '$1==ob { if (index($0,"openbox-autostart")) exit; split($2,t,":"); s=t[1]*3600+t[2]*60+t[3]; if (p!="") printf "  +%5.2fs after: %s\n", s-p, substr(prev,7,130); p=s; prev=$0 }' /tmp/session.strace | sort -rn | head -10
+	fi
 fi
 echo "---kernel modules loaded now (initrd ships 360)---"
 echo "  $(lsmod | awk 'NR>1' | wc -l) loaded: $(lsmod | awk 'NR>1{print $1}' | sort | tr '\n' ' ')"
