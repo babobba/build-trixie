@@ -20,9 +20,23 @@ done
 # already named (ext2 and ext3 are ext4), nothing the kernel autoloads at
 # mount time (the nls_ tables), and nothing linuxrc loads itself when a
 # cheatcode asks for it (dm_crypt and its ciphers).
-for m in fat cdrom jbd2 ext2 ext3 nls_cp437 nls_utf8 dm_crypt cryptd xts crc32c_generic; do
+for m in fat cdrom jbd2 ext2 ext3 dm_crypt cryptd xts; do
 	assert_not_grep "modlist does not carry $m" "$MODLIST" "\\b$m\\b"
 done
+# The nls tables are requested by the kernel when a vfat, ntfs or joliet
+# filesystem is mounted - not a dependency modprobe can see, and this
+# initrd historically had no /sbin/modprobe for the kernel to call, so
+# they are loaded by name as they always were. A FAT stick is the most
+# common live medium there is.
+for m in nls_cp437 nls_iso8859_1 nls_utf8; do
+	assert_grep "modlist carries $m for FAT media" "$MODLIST" "\\b$m\\b"
+done
+# One dependency is listed on purpose. ext4, btrfs, xfs and f2fs need the
+# crc32c algorithm, but only as a soft dependency the kernel requests by
+# alias at mount time, and busybox's modprobe does not follow softdeps.
+# Without it here an ext4 partition simply fails to mount in the initrd -
+# the readonly, forensic and magic boot tests caught exactly that.
+assert_grep "modlist carries crc32c_generic, ext4's soft dependency" "$MODLIST" '\bcrc32c_generic\b'
 for m in ahci nvme ata_piix xhci_hcd e1000e virtio_blk virtio_scsi hv_vmbus vmxnet3 xen_blkfront; do
 	assert_not_grep "modlist does not name $m" "$MODLIST" "\\b$m\\b"
 done
