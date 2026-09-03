@@ -39,18 +39,65 @@ command -v qemu-system-x86_64 >/dev/null || bt_skip "qemu-system-x86_64 not inst
 command -v xorriso >/dev/null || bt_skip "xorriso not installed"
 command -v cpio >/dev/null || bt_skip "cpio not installed"
 
+# The initrd may be xz (the historic format) or zstd (what mkinitrd writes
+# when zstd is installed); the file is called initrd1.xz either way. Detect by
+# magic, and repack with whatever it was, so a test boots the format the build
+# produced.
+bt_initrd_format() {   # FILE -> xz | zstd
+	case "$(od -An -tx1 -N4 "$1" | tr -d ' \n')" in
+		fd377a58) echo xz ;;
+		28b52ffd) echo zstd ;;
+		*) bt_fail "$1 is neither an xz nor a zstd initrd" ;;
+	esac
+}
+bt_initrd_unpack() {   # FILE DIR
+	case "$(bt_initrd_format "$1")" in
+		xz)   ( cd "$2" && xz -dc "$1" | cpio -idm --quiet 2>/dev/null ) ;;
+		zstd) ( cd "$2" && zstd -dc "$1" | cpio -idm --quiet 2>/dev/null ) ;;
+	esac
+}
+bt_initrd_pack() {     # DIR FORMAT > stdout
+	case "$2" in
+		xz)   ( cd "$1" && find . | cpio -o -H newc --quiet 2>/dev/null | xz -f --check=crc32 ) ;;
+		zstd) ( cd "$1" && find . | cpio -o -H newc --quiet 2>/dev/null | zstd -q -19 -T0 ) ;;
+	esac
+}
+
+# The same rule as mkinitrd's modprobe -D pass, without needing kmod on the
+# host: a name is kept if modules.dep lists it, or modules.alias names it
+# exactly (ext2 is an alias of ext4), and modules.builtin does not.
+filter_modlist() {
+	KV=$(ls "$IRD/lib/modules" | head -1); D="$IRD/lib/modules/$KV"
+	{ sed -n 's|^.*/\([^/]*\)\.ko:.*|\1|p' "$D/modules.dep"
+	  sed -n 's/^alias \([^*? ]*\) .*/\1/p' "$D/modules.alias"; } | tr - _ | sort -u > "$WORK/mods.present"
+	sed -n 's|^.*/\([^/]*\)\.ko$|\1|p' "$D/modules.builtin" | tr - _ | sort -u > "$WORK/mods.builtin"
+	: > "$IRD/modlist"
+	for m in $(cat "$REPO/initrd-src/modlist"); do
+		n=$(echo "$m" | tr - _)
+		grep -qx "$n" "$WORK/mods.present" && ! grep -qx "$n" "$WORK/mods.builtin" && printf '%s ' "$m" >> "$IRD/modlist"
+	done
+	echo "   modlist: $(wc -w < "$IRD/modlist") of $(wc -w < "$REPO/initrd-src/modlist") names resolve in this initrd"
+}
+
 # Rebuild initrd1.xz around the scripts in initrd-src, so the test boots the
 # code in the working tree.  blockdev is injected the way mkinitrd does it,
 # taken from the built rootfs so the libc matches the guest rather than the
 # build host.
 repack_initrd() {
 	IRD="$WORK/ird"; rm -rf "$IRD"; mkdir -p "$IRD"
-	( cd "$IRD" && xz -dc "$WORK/iso/live/initrd1.xz" | cpio -idm --quiet 2>/dev/null ) \
-		|| bt_fail "could not unpack initrd1.xz"
-	for f in linuxrc finit modlist; do
+	IRD_FMT=$(bt_initrd_format "$WORK/iso/live/initrd1.xz")
+	bt_initrd_unpack "$WORK/iso/live/initrd1.xz" "$IRD" || bt_fail "could not unpack initrd1.xz"
+	echo "   initrd is $IRD_FMT"
+	for f in linuxrc finit; do
 		[ -f "$REPO/initrd-src/$f" ] && cp -f "$REPO/initrd-src/$f" "$IRD/$f"
 	done
 	chmod +x "$IRD/linuxrc"
+	# modlist is not copied verbatim. mkinitrd keeps only the names that
+	# resolve to a module in the initrd (a real file, or an alias of one, and
+	# not built in), and the boot loop is sized by that list. Copying the raw
+	# source list booted every test with ~100 extra modprobe calls that the
+	# shipped initrd never makes, which inflated the profiler's numbers.
+	[ -f "$REPO/initrd-src/modlist" ] && filter_modlist
 
 	if ! [ -x "$IRD/bin/blockdev" ] && ! [ -x "$IRD/sbin/blockdev" ] \
 	   && grep -q "blockdev" "$REPO/dog-boot-trixie-20240602/usr/local/mkinitrd" 2>/dev/null; then
@@ -77,8 +124,7 @@ repack_initrd() {
 		rmdir "$SQ" 2>/dev/null
 	fi
 
-	( cd "$IRD" && find . | cpio -o -H newc --quiet 2>/dev/null | xz -f --check=crc32 ) \
-		> "$WORK/iso/live/initrd1.xz" || bt_fail "could not repack initrd1.xz"
+	bt_initrd_pack "$IRD" "$IRD_FMT" > "$WORK/iso/live/initrd1.xz" || bt_fail "could not repack initrd1.xz"
 }
 
 bt_build() {
