@@ -1,0 +1,35 @@
+# Overrides /usr/lib/systemd/system/networking.service for its ordering
+# only. The shipped unit is Before=network.target, and network.target is
+# what systemd-user-sessions.service - and through it every getty - waits
+# for. On this image /etc/network/interfaces configures nothing, so ifup -a
+# brings up lo and runs the if-up.d hooks for it (wpasupplicant, resolved,
+# mountnfs, ntpsec-ntpdate, ifmetric): seven seconds under emulation, one
+# or two on hardware, between the kernel and the login prompt, for an
+# interface systemd had already brought up itself.
+#
+# ifup -a still runs at boot exactly as before, and an interface marked
+# auto still comes up; the login simply no longer waits for it. The unit
+# body below is the shipped one with the Before=network.target and
+# Before=network-online.target orderings removed.
+[Unit]
+Description=Raise network interfaces
+Documentation=man:interfaces(5)
+DefaultDependencies=no
+Wants=network.target ifupdown-pre.service
+After=local-fs.target network-pre.target apparmor.service systemd-sysctl.service systemd-modules-load.service ifupdown-pre.service
+Before=shutdown.target
+Conflicts=shutdown.target
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/networking
+ExecStart=/usr/sbin/ifup -a --read-environment
+ExecStart=-/bin/sh -c 'if [ -f /run/network/restart-hotplug ]; then /usr/sbin/ifup -a --read-environment --allow=hotplug; fi'
+ExecStop=/usr/sbin/ifdown -a --read-environment --exclude=lo
+ExecStopPost=/usr/bin/touch /run/network/restart-hotplug
+RemainAfterExit=true
+TimeoutStartSec=5min
