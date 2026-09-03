@@ -99,16 +99,27 @@ bt_extra_setup() {
 	# The guest has no strace, so the host's is carried in with the libraries
 	# it needs and run from /opt/strace; ~/.xsession is where Debian's Xsession
 	# lets a user take over the session, and it is used for exactly that.
-	if [ "${PROF_STRACE:-0}" = 1 ]; then
+	# PROF_STRACE=openbox traces every syscall of the openbox process alone
+	# (no children), for the case where the session-wide trace shows it
+	# going quiet: the syscall it went quiet in is the answer.
+	if [ "${PROF_STRACE:-0}" != 0 ]; then
 		command -v strace >/dev/null || bt_fail "PROF_STRACE needs strace on the host"
 		RC="$WORK/iso/live/rootcopy"; mkdir -p "$RC/opt/strace" "$RC/root"
 		cp -L "$(command -v strace)" "$RC/opt/strace/strace"
 		for lib in $(ldd "$(command -v strace)" | awk '/=> \//{print $3}' | grep -v 'libc\.so'); do cp -L "$lib" "$RC/opt/strace/"; done
-		cat > "$RC/root/.xsession" <<'XS'
+		if [ "$PROF_STRACE" = openbox ]; then
+			cat > "$RC/root/.xsession" <<'XS'
+#!/bin/sh
+read UP _ < /proc/uptime; echo "PROF $UP xsession: strace (openbox only, all syscalls) starts openbox-session" > /dev/ttyS0
+exec env LD_LIBRARY_PATH=/opt/strace /opt/strace/strace -tt -o /tmp/openbox.strace openbox-session
+XS
+		else
+			cat > "$RC/root/.xsession" <<'XS'
 #!/bin/sh
 read UP _ < /proc/uptime; echo "PROF $UP xsession: strace starts openbox-session" > /dev/ttyS0
 exec env LD_LIBRARY_PATH=/opt/strace /opt/strace/strace -f -tt -e trace=execve,connect,openat -o /tmp/session.strace openbox-session
 XS
+		fi
 		chmod +x "$RC/root/.xsession"
 		# The X server as well, execve only: a client that goes quiet for
 		# seconds is usually waiting on the server, and what the server runs
@@ -159,6 +170,11 @@ systemctl cat getty.target 2>/dev/null | grep -E '^(After|Before|Wants)=' | sed 
 echo "---font caches (built at first start if absent from the image)---"
 ls -la --time-style=+%T /var/cache/fontconfig 2>/dev/null | head -4 | sed 's/^/  /'; ls -la --time-style=+%T /root/.cache/fontconfig 2>/dev/null | head -4 | sed 's/^/  /'
 echo "  now: $(date +%T)"
+if [ -s /tmp/openbox.strace ]; then
+	echo "---openbox alone, every syscall: the 15 longest gaps and the syscall each was spent in---"
+	awk '{ split($2,t,":"); s=t[1]*3600+t[2]*60+t[3]; if (p!="" && s-p>0.2) printf "  +%5.2fs in: %s\n", s-p, substr(prev,1,150); p=s; prev=$0 }' /tmp/openbox.strace | sort -rn | head -15
+	echo "  syscalls traced: $(wc -l < /tmp/openbox.strace); nanosleep/clock_nanosleep calls: $(grep -c 'nanosleep' /tmp/openbox.strace); execve: $(grep -c 'execve(' /tmp/openbox.strace)"
+fi
 if [ -s /tmp/session.strace ]; then
 	echo "---strace of the X session: every execve, then the 12 longest gaps (pid, gap, the line before the gap)---"
 	grep -a 'execve(' /tmp/session.strace | grep -v ENOENT | sed -E 's/^([0-9]+) ([0-9:.]+) execve\("([^"]*)".*/  \2 pid \1 \3/' | head -40
