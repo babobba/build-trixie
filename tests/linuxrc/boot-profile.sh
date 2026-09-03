@@ -91,6 +91,19 @@ bt_extra_setup() {
 		      -e 's/^volumeicon &$/prof "autostart: volumeicon"; &/' "$X/root/.config/openbox/autostart"
 		  echo 'prof "autostart: end of the shipped script"'; } > "$RC/root/.config/openbox/autostart"
 		chmod 644 "$RC/etc/profile"; chmod 755 "$RC/root/.config/openbox/autostart"
+		# rc.local as well - getty@tty1 waits for it, so its steps are on the
+		# path to the login prompt.
+		unsquashfs -q -f -d "$X" "$ISODATA/live/01-filesystem.squashfs" etc/rc.local >/dev/null 2>&1
+		[ -f "$RC/etc/rc.local" ] && cp -f "$RC/etc/rc.local" "$X/etc/rc.local"
+		if [ -f "$X/etc/rc.local" ]; then
+			{ sed -n '1p' "$X/etc/rc.local"; echo "$GPROF"; echo 'prof "rc.local: begin"'
+			  sed -e '1d' -e 's|^/usr/local/bin/mountlink$|prof "rc.local: mountlink"; &|' \
+			      -e 's|^/usr/local/bin/mnt-backing$|prof "rc.local: mnt-backing"; &|' \
+			      -e 's|^cat /opt/docs/welcome|prof "rc.local: welcome"; &|' \
+			      -e 's|^/usr/local/bin/cowsave$|prof "rc.local: cowsave"; &|' \
+			      -e 's|^exit 0$|prof "rc.local: done"; exit 0|' "$X/etc/rc.local"; } > "$RC/etc/rc.local"
+			chmod 755 "$RC/etc/rc.local"
+		fi
 		echo "   fine mode: per-modprobe stamps, stamped /etc/profile and openbox autostart"
 	fi
 	# PROF_STRACE=1 traces the whole X session - openbox-session and every
@@ -111,7 +124,7 @@ bt_extra_setup() {
 			cat > "$RC/root/.xsession" <<'XS'
 #!/bin/sh
 read UP _ < /proc/uptime; echo "PROF $UP xsession: strace (openbox only, all syscalls) starts openbox-session" > /dev/ttyS0
-exec env LD_LIBRARY_PATH=/opt/strace /opt/strace/strace -tt -o /tmp/openbox.strace openbox-session
+exec env LD_LIBRARY_PATH=/opt/strace /opt/strace/strace -tt -T -o /tmp/openbox.strace openbox-session
 XS
 		else
 			cat > "$RC/root/.xsession" <<'XS'
@@ -174,6 +187,12 @@ if [ -s /tmp/openbox.strace ]; then
 	echo "---openbox alone, every syscall: the 15 longest gaps and the syscall each was spent in---"
 	awk '{ split($2,t,":"); s=t[1]*3600+t[2]*60+t[3]; if (p!="" && s-p>0.2) printf "  +%5.2fs in: %s\n", s-p, substr(prev,1,150); p=s; prev=$0 }' /tmp/openbox.strace | sort -rn | head -15
 	echo "  syscalls traced: $(wc -l < /tmp/openbox.strace); nanosleep/clock_nanosleep calls: $(grep -c 'nanosleep' /tmp/openbox.strace); execve: $(grep -c 'execve(' /tmp/openbox.strace)"
+	# Where the wall clock went between rc.xml and the autostart: per syscall,
+	# count and time inside it (-T), against the window's length. Whatever is
+	# left over is user-space CPU.
+	awk 'BEGIN{w=0} /openat\(.*rc\.xml/{w=1; split($1,t,":"); t0=t[1]*3600+t[2]*60+t[3]} /execve\(.*openbox-autostart/{ if (w) { split($1,t,":"); t1=t[1]*3600+t[2]*60+t[3] }; w=0 }
+	     w { n=$2; sub(/\(.*/,"",n); c[n]++; if (match($0,/<[0-9.]+>$/)) s[n]+=substr($0,RSTART+1,RLENGTH-2) }
+	     END { printf "  window rc.xml -> autostart: %.2fs\n", t1-t0; tot=0; for (k in c) { tot+=s[k]; printf "  %6d  %7.2fs  %s\n", c[k], s[k], k }; printf "  time inside syscalls: %.2fs; the rest is user-space CPU\n", tot }' /tmp/openbox.strace | sort -k2 -rn | head -14
 fi
 if [ -s /tmp/session.strace ]; then
 	echo "---strace of the X session: every execve, then the 12 longest gaps (pid, gap, the line before the gap)---"
