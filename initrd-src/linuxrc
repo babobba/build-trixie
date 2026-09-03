@@ -92,16 +92,67 @@ if [ -n "$MODPBLST" ]; then
 fi
 
 if param nocd || [ $IP ]; then
-sed 's/pata_[0-9a-z]\{3,\} //g' -i modlist
+    # nocd: no IDE/ATAPI drivers, so a machine with a slow or broken optical
+    # drive is not probed. They are removed from the tree rather than from
+    # the list, because the list no longer names them - the hardware pass
+    # below would otherwise find them by PCI id.
+    find /lib/modules/$(uname -r)/kernel/drivers/ata -name 'pata_*' -delete 2>/dev/null
 fi
+
+# Two passes over the module tree. First the list in modlist: filesystems,
+# the block and USB storage classes, the HID basics - everything the union
+# needs that no device announces. Then the hardware: every device the kernel
+# has found so far carries a modalias in /sys, and modprobe resolves one to a
+# driver through modules.alias exactly as udev will later. Drivers for
+# hardware that is not present are never touched. That is what makes this
+# cheaper than the old list of 200-odd names probed one by one - a machine
+# announces a few dozen devices - and a boot medium behind an unusual
+# controller still finds its driver, because the controller announced itself.
+#
+# The hardware pass runs twice. Loading a host controller (xhci, virtio-pci,
+# hv_vmbus) makes the devices behind it appear with modaliases of their own,
+# and those are only visible on the second pass, which loads only what is new.
+load_by_modalias() {
+    # Gather without forking: read and echo are builtins, and a laptop has a
+    # few hundred of these files.
+    : > /tmp/modalias.$1
+    for A in /sys/bus/*/devices/*/modalias; do
+        case "$A" in */bus/cpu/*) continue ;; esac
+        read M < "$A" 2>/dev/null && echo "$M" >> /tmp/modalias.$1
+    done
+    sort -u /tmp/modalias.$1 > /tmp/modalias.$1.u
+    if [ "$1" = 2 ] && [ -s /tmp/modalias.1 ]; then
+        grep -vxF -f /tmp/modalias.1 /tmp/modalias.$1.u > /tmp/modalias.$1 2>/dev/null
+    else
+        mv /tmp/modalias.$1.u /tmp/modalias.$1
+    fi
+    # Only aliases that some shipped driver claims are handed to modprobe.
+    # Most of what a machine announces (ACPI objects, platform devices, the
+    # PCI bridges themselves) matches nothing, and each of those would be a
+    # modprobe process that scans the index to say so. modules.alias holds
+    # the patterns; turned into anchored regexes once, one grep does the
+    # matching. If that grep fails outright the unfiltered list is used, so a
+    # broken pattern costs time rather than a driver.
+    if [ ! -s /tmp/modalias.re ]; then
+        sed -n 's/^alias \([^ ]*\) .*/\1/p' /lib/modules/$(uname -r)/modules.alias \
+          | sed 's/[.^$+?()[{}|\\]/\\&/g; s/\]/\\]/g; s/\*/.*/g; s/^/^/; s/$/$/' > /tmp/modalias.re
+    fi
+    grep -E -f /tmp/modalias.re /tmp/modalias.$1 > /tmp/modalias.$1.hit 2>/dev/null
+    [ $? -eq 2 ] && cp /tmp/modalias.$1 /tmp/modalias.$1.hit
+    for M in `cat /tmp/modalias.$1.hit`; do modprobe "$M" 2>/dev/null; done
+}
 
 if param nohotplug; then
     echo $i"nohotplug - skipping automatic module loading"
 else
-for MODULE in $(cat modlist)
-do
-modprobe $MODULE 2> /dev/null
-done
+    for MODULE in $(cat modlist); do modprobe $MODULE 2>/dev/null; done
+    load_by_modalias 1
+    load_by_modalias 2
+    # An SD card announces itself on the mmc bus only once the host
+    # controller has scanned it, which can be after the second pass; the
+    # block driver is loaded whenever a host controller turned up, so a
+    # card in an internal reader is not missed.
+    [ -n "$(ls /sys/class/mmc_host 2>/dev/null)" ] && modprobe mmc_block 2>/dev/null
 fi
 
 
@@ -1230,9 +1281,11 @@ sed -i 's/ ntfs / ntfs-3g /g' /etc/fstab
 # ln -sf /mnt/live/mnt/$x /union/mnt/$x
 #done
 
-for MODULE in `sed 's/ /\n/g' modlist | grep ata_`
-do modprobe -r $MODULE 2>/dev/null
-done
+# The ata drivers used to be unloaded here, one modprobe -r at a time, a
+# habit from when the initrd loaded every pata_ driver it carried and the
+# real system's udev was expected to sort out the right one. Drivers are now
+# loaded for the hardware that is present, so there is nothing to undo, and
+# the two seconds it cost are better spent elsewhere.
 
 #cp -r /etc/porteus /union/etc 2>/dev/null
 umount -n /lib/modules 2>/dev/null
