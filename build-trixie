@@ -582,12 +582,12 @@ echo -e "\e[0;36mInstall keyboard-configuration and more required packages\033[0
 # installed but idle, and the 00systemd pin keeps it from coming back.
 # libelogind-compat is Devuan-only and not needed: on Debian libelogind0 and
 # libsystemd0 coexist.
-apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration initscripts sysvinit-core xz-utils cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget elogind libelogind0 libpam-elogind udev systemd- systemd-sysv- libpam-systemd- --yes
+apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration initscripts sysvinit-core xz-utils zstd cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget elogind libelogind0 libpam-elogind udev systemd- systemd-sysv- libpam-systemd- --yes
 
 else
 rm -f /etc/apt/preferences.d/00systemd
 echo -e "\e[0;36mInstall keyboard-configuration and more required packages\033[0m"
-apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration xz-utils cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget systemd systemd-sysv libpam-systemd udev --yes
+apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration xz-utils zstd cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget systemd systemd-sysv libpam-systemd udev --yes
 fi
 
 # commented out all below as the google signing key is nowadays automatically added
@@ -903,6 +903,17 @@ echo -e "\e[0;36mCopy contents (if exist) of rootcopy directory...\033[0m"
 find ../rootcopy -mindepth 1 ! -name ReadMe -exec cp -af "{}" chroot/ \; 2> /dev/null
 
 export nmu=""  # no-merged-usr not supported anymore post-bookworm
+
+# systemd's ConditionNeedsUpdate: ldconfig.service and systemd-update-done
+# run at boot whenever /etc/.updated is older than /usr, and on a live system
+# whose overlay starts empty every boot that was every boot - five seconds of
+# ldconfig on the critical chain before the first login. Stamp the tree now,
+# after the last package is in, the way systemd-update-done does at boot.
+if [ -x chroot/usr/lib/systemd/systemd-update-done ]; then
+echo -e "\e[0;36mStamping /etc/.updated and /var/.updated so ldconfig does not run on every boot\033[0m"
+chroot chroot /usr/lib/systemd/systemd-update-done
+ok_or_failed
+fi
 
 # Allow the user to makes changes in chroot just before creating filesystem.squashfs 
 echo "At this point you may want to add/edit/delete files in chroot folder"
