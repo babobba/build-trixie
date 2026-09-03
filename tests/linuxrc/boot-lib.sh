@@ -150,6 +150,13 @@ bt_build() {
 		> "$WORK/iso/live/rootcopy/usr/local/bin/rgui"
 	chmod +x "$WORK/iso/live/rootcopy/usr/local/bin/rcli" \
 	         "$WORK/iso/live/rootcopy/usr/local/bin/rgui"
+	# The initrd copies rootcopy onto the union with cp -a, which gives the
+	# union's /usr the mtime of rootcopy/usr - the moment this test made it.
+	# That is newer than the image's update-done stamp, so every test boot
+	# would run ldconfig.service and look like an image that ships without
+	# the stamp. A real boot has an empty rootcopy. Date these directories
+	# in the past so the union's /usr keeps an old mtime, as it does then.
+	find "$WORK/iso/live/rootcopy" -type d -exec touch -d 2000-01-01 {} +
 
 	# A test that needs more than rcli/rgui on the medium - a config file
 	# delivered through rootcopy, say - defines bt_extra_setup and gets its
