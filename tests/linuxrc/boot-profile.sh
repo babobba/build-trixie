@@ -165,6 +165,8 @@ journalctl -b -o short-monotonic --no-pager 2>/dev/null | grep -aE 'Startup fini
 echo "---process start times (uptime - etimes)---"
 NOW=$(cut -d' ' -f1 /proc/uptime | cut -d. -f1)
 ps -eo etimes,pid,comm --sort=-etimes 2>/dev/null | awk -v now="$NOW" 'NR>1 && $3 ~ /^(agetty|login|bash|sh|startx|xinit|Xorg|X|openbox|pcmanfm|lxpanel|conky|dbus-daemon|rcli|cliexec-cheat|rc.local|systemd|systemd-udevd|systemd-journal)$/ { printf "  %6ds  %s (pid %s)\n", now-$1, $3, $2 }'
+echo "---CPU time consumed so far (TIME) against age (ELAPSED): who has been busy---"
+ps -o pid,etimes,times,comm -C Xorg,openbox,pcmanfm,lxpanel,conky,systemd 2>/dev/null | sed 's/^/  /'
 echo "---X server: first/last log stamp and the 8 biggest gaps inside---"
 for f in /var/log/Xorg.0.log /root/.local/share/xorg/Xorg.0.log; do [ -f "$f" ] || continue
 	echo "  $f: $(grep -aoE '^\[ *[0-9.]+\]' "$f" | sed -n '1p' | tr -d '[] ') -> $(grep -aoE '^\[ *[0-9.]+\]' "$f" | tail -1 | tr -d '[] ')"
@@ -192,7 +194,8 @@ if [ -s /tmp/openbox.strace ]; then
 	# left over is user-space CPU.
 	awk 'BEGIN{w=0} /openat\(.*rc\.xml/{w=1; split($1,t,":"); t0=t[1]*3600+t[2]*60+t[3]} /execve\(.*openbox-autostart/{ if (w) { split($1,t,":"); t1=t[1]*3600+t[2]*60+t[3] }; w=0 }
 	     w { n=$2; sub(/\(.*/,"",n); c[n]++; if (match($0,/<[0-9.]+>$/)) s[n]+=substr($0,RSTART+1,RLENGTH-2) }
-	     END { printf "  window rc.xml -> autostart: %.2fs\n", t1-t0; tot=0; for (k in c) { tot+=s[k]; printf "  %6d  %7.2fs  %s\n", c[k], s[k], k }; printf "  time inside syscalls: %.2fs; the rest is user-space CPU\n", tot }' /tmp/openbox.strace | sort -k2 -rn | head -14
+	     END { tot=0; for (k in c) { tot+=s[k]; printf "  %6d  %7.2fs  %s\n", c[k], s[k], k }; printf "WINDOW rc.xml -> autostart: %.2fs, of which inside syscalls %.2fs; the rest is user-space CPU\n", t1-t0, tot }' /tmp/openbox.strace > /tmp/ob.summary
+	grep '^WINDOW' /tmp/ob.summary | sed 's/^/  /'; grep -v '^WINDOW' /tmp/ob.summary | sort -k2 -rn | head -12
 fi
 if [ -s /tmp/session.strace ]; then
 	echo "---strace of the X session: every execve, then the 12 longest gaps (pid, gap, the line before the gap)---"
