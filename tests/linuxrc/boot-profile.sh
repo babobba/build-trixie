@@ -167,6 +167,10 @@ NOW=$(cut -d' ' -f1 /proc/uptime | cut -d. -f1)
 ps -eo etimes,pid,comm --sort=-etimes 2>/dev/null | awk -v now="$NOW" 'NR>1 && $3 ~ /^(agetty|login|bash|sh|startx|xinit|Xorg|X|openbox|pcmanfm|lxpanel|conky|dbus-daemon|rcli|cliexec-cheat|rc.local|systemd|systemd-udevd|systemd-journal)$/ { printf "  %6ds  %s (pid %s)\n", now-$1, $3, $2 }'
 echo "---CPU time consumed so far (TIME) against age (ELAPSED): who has been busy---"
 ps -o pid,etimes,times,comm -C Xorg,openbox,pcmanfm,lxpanel,conky,systemd 2>/dev/null | sed 's/^/  /'
+# PID 1 split into user and kernel time. Under QEMU a serial console is
+# written synchronously, byte by byte, and systemd's status lines are
+# many: kernel time dominating here is that, not systemd working.
+HZ=$(getconf CLK_TCK); awk -v hz="$HZ" '{ printf "  pid 1: user %.1fs, kernel %.1fs\n", $14/hz, $15/hz }' /proc/1/stat
 echo "---X server: first/last log stamp and the 8 biggest gaps inside---"
 for f in /var/log/Xorg.0.log /root/.local/share/xorg/Xorg.0.log; do [ -f "$f" ] || continue
 	echo "  $f: $(grep -aoE '^\[ *[0-9.]+\]' "$f" | sed -n '1p' | tr -d '[] ') -> $(grep -aoE '^\[ *[0-9.]+\]' "$f" | tail -1 | tr -d '[] ')"
