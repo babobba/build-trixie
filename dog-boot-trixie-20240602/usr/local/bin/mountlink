@@ -24,11 +24,11 @@ fi
 if grep -q noauto /proc/cmdline; then
 CDEV=$(cat /mnt/live/tmp/cdev 2> /dev/null)
 else
-  if findmnt | grep -q "/mnt/live/memory/images/changes-exit"; then
-CDEV=$(findmnt | grep "/mnt/live/memory/images/changes-exit" | awk '{print $3}'| sed 's#[][]##g' | cut -d'/' -f3)
-  else
-CDEV=$(findmnt | grep "/mnt/live/memory/changes" | awk '{print $3}'| sed 's#[][]##g' | cut -d'/' -f3)
-  fi
+  # One lookup each, by mountpoint, instead of listing every mount and
+  # grepping the list twice. rc.local is on the path to the login prompt.
+  CDEV=$(findmnt -n -o SOURCE /mnt/live/memory/images/changes-exit 2>/dev/null)
+  [ "$CDEV" ] || CDEV=$(findmnt -n -o SOURCE /mnt/live/memory/changes 2>/dev/null)
+  CDEV=$(echo "$CDEV" | sed 's#[][]##g' | cut -d'/' -f3)
 fi
 
 # mount CDEV
@@ -45,7 +45,15 @@ ln -snf /mnt/home /live/image
 
 if grep -qv noswap /proc/cmdline; then
   echo "LOAD SWAP"
-  for ONESWAP in `fdisk -l 2> /dev/null | grep ' Linux swap'  | cut -f 1 -d ' ' | tr '\n' ' '`
+  # The initrd already identified every swap partition with blkid and wrote
+  # them into its fstab, which survives at /mnt/live/etc/fstab; read that
+  # rather than have fdisk parse the partition table of every disk again.
+  if [ -f /mnt/live/etc/fstab ]; then
+  SWAPS=$(grep ' none swap ' /mnt/live/etc/fstab | cut -d' ' -f1 | tr '\n' ' ')
+  else
+  SWAPS=$(fdisk -l 2> /dev/null | grep ' Linux swap'  | cut -f 1 -d ' ' | tr '\n' ' ')
+  fi
+  for ONESWAP in $SWAPS
   do
     echo -n "Loading swap partition $ONESWAP..." >/dev/console
     swapon $ONESWAP
