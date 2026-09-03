@@ -101,7 +101,7 @@ bt_extra_setup() {
 			      -e 's|^/usr/local/bin/mnt-backing$|prof "rc.local: mnt-backing"; &|' \
 			      -e 's|^cat /opt/docs/welcome|prof "rc.local: welcome"; &|' \
 			      -e 's|^/usr/local/bin/cowsave$|prof "rc.local: cowsave"; &|' \
-			      -e 's|^exit 0$|prof "rc.local: done"; exit 0|' "$X/etc/rc.local"; } > "$RC/etc/rc.local"
+			      -e 's|^exit 0$|prof "rc.local: done"\nexit 0|' "$X/etc/rc.local"; } > "$RC/etc/rc.local"
 			chmod 755 "$RC/etc/rc.local"
 		fi
 		echo "   fine mode: per-modprobe stamps, stamped /etc/profile and openbox autostart"
