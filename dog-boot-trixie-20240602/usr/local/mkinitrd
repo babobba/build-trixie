@@ -228,6 +228,14 @@ modprobe -S $kernel -d $INITRAMFS -Dq $m | grep -v builtin > /dev/null 2> /dev/n
 done
 rm $INITRAMFS/modlist.tmp
 
+## The hardware pass in linuxrc matches the machine's modaliases against the
+## patterns in modules.alias with one grep, so that only aliases a shipped
+## driver claims cost a modprobe. Turning 3000-odd glob patterns into anchored
+## regexes is the same work every boot; do it once here.
+sed -n 's/^alias \([^ ]*\) .*/\1/p' $INITRAMFS/$LMK/modules.alias \
+  | sed 's/[.^$+?()[{}|\\]/\\&/g; s/\]/\\]/g; s/\*/.*/g; s/^/^/; s/$/$/' > $INITRAMFS/$LMK/modules.alias.re
+echo "modules.alias.re: $(wc -l < $INITRAMFS/$LMK/modules.alias.re) patterns"
+
 ## Prebuild busybox modprobe's index. The initrd's modprobe is the "small"
 ## variant: it does not read modules.dep, it scans every module for aliases
 ## and dependencies the first time it runs and there is no modules.dep.bb,

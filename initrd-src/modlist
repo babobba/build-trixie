@@ -1,1 +1,1 @@
-overlay squashfs loop isofs ext4 vfat exfat ntfs3 btrfs xfs f2fs sd_mod sr_mod usb_storage uas usbhid hid_generic
+overlay squashfs loop isofs crc32c_generic ext4 vfat nls_cp437 nls_iso8859_1 nls_utf8 nls_ascii exfat ntfs3 btrfs xfs f2fs sd_mod sr_mod usb_storage uas usbhid hid_generic

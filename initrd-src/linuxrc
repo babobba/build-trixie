@@ -18,6 +18,12 @@ fi
 mount -nt proc proc /proc
 mount -nt sysfs sysfs /sys
 echo 0 >/proc/sys/kernel/printk
+# When the kernel needs a module it did not get told about - an nls table
+# for a FAT mount, a cipher for dm-crypt, a filesystem named on a mount -
+# it runs /sbin/modprobe, and this initrd has never had one: busybox's
+# applets live in /bin. Point the kernel at the one that exists, so that
+# on-demand loading works here as it does on the installed system.
+[ -x /sbin/modprobe ] || echo /bin/modprobe > /proc/sys/kernel/modprobe
 
 echo "`cat /proc/cmdline|sed -e 's/^/ /'`" > /etc/cmdline
 param() { egrep -qo " $1( |\$)" /etc/cmdline; }
@@ -133,18 +139,32 @@ load_by_modalias() {
     # the patterns; turned into anchored regexes once, one grep does the
     # matching. If that grep fails outright the unfiltered list is used, so a
     # broken pattern costs time rather than a driver.
+    # mkinitrd ships the pattern file ready-made as modules.alias.re; it is
+    # built here only for an initrd that predates that.
     if [ ! -s /tmp/modalias.re ]; then
-        sed -n 's/^alias \([^ ]*\) .*/\1/p' /lib/modules/$(uname -r)/modules.alias \
-          | sed 's/[.^$+?()[{}|\\]/\\&/g; s/\]/\\]/g; s/\*/.*/g; s/^/^/; s/$/$/' > /tmp/modalias.re
+        if [ -s /lib/modules/$(uname -r)/modules.alias.re ]; then
+            cp /lib/modules/$(uname -r)/modules.alias.re /tmp/modalias.re
+        else
+            sed -n 's/^alias \([^ ]*\) .*/\1/p' /lib/modules/$(uname -r)/modules.alias \
+              | sed 's/[.^$+?()[{}|\\]/\\&/g; s/\]/\\]/g; s/\*/.*/g; s/^/^/; s/$/$/' > /tmp/modalias.re
+        fi
     fi
     grep -E -f /tmp/modalias.re /tmp/modalias.$1 > /tmp/modalias.$1.hit 2>/dev/null
     [ $? -eq 2 ] && cp /tmp/modalias.$1 /tmp/modalias.$1.hit
     for M in `cat /tmp/modalias.$1.hit`; do modprobe "$M" 2>/dev/null; done
 }
 
+# SCSI scanning is asynchronous by default: modprobe of a disk controller
+# returns while its ports are still being probed, and the block devices
+# turn up some time later. The old list of a hundred-odd modprobes hid that
+# by taking seconds; loading only what is present takes well under one,
+# and fstab then enumerated the disks before they existed. scan=sync makes
+# the controller's modprobe return only once its devices are known; it has
+# to be set on scsi_mod before anything pulls that in as a dependency.
 if param nohotplug; then
     echo $i"nohotplug - skipping automatic module loading"
 else
+    modprobe scsi_mod scan=sync 2>/dev/null
     for MODULE in $(cat modlist); do modprobe $MODULE 2>/dev/null; done
     load_by_modalias 1
     load_by_modalias 2
@@ -153,6 +173,17 @@ else
     # block driver is loaded whenever a host controller turned up, so a
     # card in an internal reader is not missed.
     [ -n "$(ls /sys/class/mmc_host 2>/dev/null)" ] && modprobe mmc_block 2>/dev/null
+    # USB storage and SD cards are enumerated by their host controllers on
+    # their own schedule, which scan=sync does not cover. Wait for the set
+    # of block devices to stop changing - half a second of no change, two
+    # seconds at most - rather than a fixed time. delay= is still there for
+    # a medium slower than that.
+    LASTB=""; SAME=0; N=0
+    while [ $N -lt 10 ]; do
+        B=$(ls /sys/class/block 2>/dev/null | tr '\n' ' ')
+        if [ "$B" = "$LASTB" ]; then SAME=$((SAME+1)); [ $SAME -ge 2 ] && break; else SAME=0; fi
+        LASTB=$B; N=$((N+1)); sleep 0.2
+    done
 fi
 
 
@@ -479,7 +510,9 @@ elif [ $CHANGES ]; then
 	    mount -o bind /mnt/$DEV/$LPTH/changes /memory/changes && touch /memory/changes/._test1 2>/dev/null
 	else
 	    if blkid /mnt/$DEV/$LPTH 2>/dev/null | cut -d" " -f3- | grep -q _LUKS; then
-		for x in dm_crypt cryptd cbc sha256_generic aes_generic aes_x86_64; do modprobe $x 2>/dev/null; done
+		# xts is what LUKS2 uses by default and essiv what LUKS1 did;
+		# neither is a dependency modprobe can see.
+		for x in dm_crypt cryptd cbc xts ecb essiv sha256_generic aes_generic aes_x86_64; do modprobe $x 2>/dev/null; done
 		losetup /dev/loop2 /mnt/$DEV/$LPTH
 		echo $i"found encrypted .dat container"
 		cryptsetup luksOpen /dev/loop2 crypt
