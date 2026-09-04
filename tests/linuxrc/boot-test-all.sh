@@ -27,6 +27,7 @@ run nomagic        $T/boot-test-nomagic.sh   NAME=nomagic  CODES=nomagic
 run pxe            $T/boot-test-pxe.sh
 run image          $T/boot-test-image.sh
 run modules        $T/boot-test-modules.sh
+run uefi           $T/boot-test-uefi.sh
 
 echo
 echo "boot tests: $pass passed, $fail failed, $skip not on this branch"
