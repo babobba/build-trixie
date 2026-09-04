@@ -34,6 +34,14 @@ SCRATCH=${SCRATCH:-0}
 # cannot mask a regression in the base; BASE_ONLY=0 is for the one test whose
 # subject is the modules themselves.
 BASE_ONLY=${BASE_ONLY:-1}
+# FIRMWARE=uefi boots the test ISO through OVMF instead of SeaBIOS. The ISO
+# must have been built from isodata-uefi (it carries efiboot.img and
+# boot/grub); the test ISO is then made hybrid the way build-trixie makes
+# the shipped one, and the boot line goes into grub.cfg as the default entry
+# as well as into isolinux's.
+FIRMWARE=${FIRMWARE:-bios}
+OVMF_CODE=${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}
+OVMF_VARS=${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}
 bt_pass=0; bt_bad=0
 
 bt_fail() { echo "FAIL: $*"; exit 1; }
@@ -167,18 +175,33 @@ bt_build() {
 	# hands on $WORK/iso before the image is closed.
 	command -v bt_extra_setup >/dev/null 2>&1 && bt_extra_setup
 
+	BT_CMDLINE="console=ttyS0,115200 from=/ $([ "$BASE_ONLY" = 1 ] && echo base_only) $CODES cliexec=/usr/local/bin/rcli guiexec=/usr/local/bin/rgui"
 	cat >> "$WORK/iso/isolinux/live.cfg" <<EOF
 
 label BOOT-TEST
 menu default
 kernel /live/vmlinuz1
-append initrd=/live/initrd1.xz console=ttyS0,115200 from=/ $([ "$BASE_ONLY" = 1 ] && echo base_only) $CODES cliexec=/usr/local/bin/rcli guiexec=/usr/local/bin/rgui
+append initrd=/live/initrd1.xz $BT_CMDLINE
 EOF
+	# The shipped EFI grub carries a chooser that looks for /grub.cfg,
+	# /boot/grub.cfg and /boot/grub/grub.cfg in that order on every device,
+	# so from an ISO it is the root grub.cfg that gets used and from a USB
+	# stick laid out by hand it may be the other. The test entry goes first
+	# in every one that exists, with a short timeout.
+	for g in "$WORK/iso/grub.cfg" "$WORK/iso/boot/grub.cfg" "$WORK/iso/boot/grub/grub.cfg"; do
+		[ -f "$g" ] || continue
+		{ printf 'set default=0\nset timeout=2\nmenuentry "BOOT-TEST" {\nlinux /live/vmlinuz1 %s\ninitrd /live/initrd1.xz\n}\n' "$BT_CMDLINE"
+		  cat "$g"; } > "$g.new" && mv "$g.new" "$g"
+	done
+	EFI_OPTS=""
+	[ -f "$WORK/iso/efiboot.img" ] && EFI_OPTS="-eltorito-alt-boot -e efiboot.img -no-emul-boot -isohybrid-gpt-basdat"
+	[ "$FIRMWARE" = uefi ] && [ -z "$EFI_OPTS" ] && bt_fail "FIRMWARE=uefi but $ISODATA has no efiboot.img - build with ISOUEFI=TRUE"
 
+	# shellcheck disable=SC2086
 	( cd "$WORK/iso" && xorriso -as mkisofs -r -J -joliet-long -l \
 	    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -partition_offset 16 \
 	    -V boottest -b isolinux/isolinux.bin -c isolinux/boot.cat \
-	    -no-emul-boot -boot-load-size 4 -boot-info-table \
+	    -no-emul-boot -boot-load-size 4 -boot-info-table $EFI_OPTS \
 	    -o "$WORK/boot-test.iso" . ) >"$WORK/xorriso.log" 2>&1 \
 	    || bt_fail "xorriso failed, see $WORK/xorriso.log"
 
@@ -225,8 +248,15 @@ bt_boot() {
 	SER="$WORK/serial.log"; : > "$SER"; rm -f "$MON"
 	DISK=""
 	[ "$SCRATCH" = 1 ] && DISK="-drive file=$WORK/scratch.img,format=raw,if=ide,index=1"
+	FW=""
+	if [ "$FIRMWARE" = uefi ]; then
+		[ -r "$OVMF_CODE" ] || bt_skip "no OVMF firmware at $OVMF_CODE"
+		cp -f "$OVMF_VARS" "$WORK/OVMF_VARS.fd"
+		FW="-drive if=pflash,format=raw,readonly=on,file=$OVMF_CODE -drive if=pflash,format=raw,file=$WORK/OVMF_VARS.fd"
+		echo "   firmware: UEFI ($OVMF_CODE)"
+	fi
 	# shellcheck disable=SC2086
-	qemu-system-x86_64 -accel tcg,thread=multi,tb-size=1024 -m 3072 -smp 4 \
+	qemu-system-x86_64 -accel tcg,thread=multi,tb-size=1024 -m 3072 -smp 4 $FW \
 	  -cdrom "$WORK/boot-test.iso" -boot d $DISK -display none -vga std \
 	  -monitor unix:"$MON",server,nowait -serial file:"$SER" -no-reboot \
 	  > "$WORK/qemu.log" 2>&1 &
