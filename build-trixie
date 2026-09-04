@@ -915,6 +915,21 @@ chroot chroot /usr/lib/systemd/systemd-update-done
 ok_or_failed
 fi
 
+# checkroot.sh on a live system. Profiled under QEMU it is 6.9 of the 35
+# seconds the rcS scripts take, and every one of its jobs is already done or
+# impossible here: the root is an overlay assembled by the initrd, so there
+# is nothing to fsck and it is writable from the start; /etc/mtab is the
+# /proc/mounts link the image ships; swap is turned on by mountlink from the
+# initrd's own fstab. Most of its time went into re-running mountkernfs.sh
+# and mountdevsubfs.sh as "reload". insserv rewires the scripts that listed
+# it as a dependency (checkfs, cryptdisks, checkroot-bootclean) and rebuilds
+# the startpar dependency files, so the rest of rcS is unchanged.
+if [ "$SYSTEMD" != "TRUE" ] && [ -x chroot/etc/init.d/checkroot.sh ]; then
+echo -e "\e[0;36mDisabling checkroot.sh - nothing for it to do on an overlay root\033[0m"
+chroot chroot update-rc.d checkroot.sh disable S 2>&1 | grep -v '^insserv: warning'
+ok_or_failed
+fi
+
 # udev's hardware database: 13 MB of hwdb.bin, most of it the PCI, USB and
 # OUI vendor-name tables that only decorate device properties with a maker's
 # name - pciutils and usbutils carry their own ids for lspci and lsusb. The
