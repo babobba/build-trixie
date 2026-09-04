@@ -39,9 +39,18 @@ BASE_ONLY=${BASE_ONLY:-1}
 # boot/grub); the test ISO is then made hybrid the way build-trixie makes
 # the shipped one, and the boot line goes into grub.cfg as the default entry
 # as well as into isolinux's.
+# FIRMWARE=uefi-secure boots with Secure Boot enforced and Microsoft's keys
+# enrolled (OVMF's .ms variables), which is what a retail PC ships with: only
+# a shim signed by Microsoft starts, and it only starts a grub signed by the
+# distribution key it trusts.
 FIRMWARE=${FIRMWARE:-bios}
-OVMF_CODE=${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}
-OVMF_VARS=${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}
+if [ "$FIRMWARE" = uefi-secure ]; then
+	OVMF_CODE=${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.secboot.fd}
+	OVMF_VARS=${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.ms.fd}
+else
+	OVMF_CODE=${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}
+	OVMF_VARS=${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}
+fi
 bt_pass=0; bt_bad=0
 
 bt_fail() { echo "FAIL: $*"; exit 1; }
@@ -195,7 +204,7 @@ EOF
 	done
 	EFI_OPTS=""
 	[ -f "$WORK/iso/efiboot.img" ] && EFI_OPTS="-eltorito-alt-boot -e efiboot.img -no-emul-boot -isohybrid-gpt-basdat"
-	[ "$FIRMWARE" = uefi ] && [ -z "$EFI_OPTS" ] && bt_fail "FIRMWARE=uefi but $ISODATA has no efiboot.img - build with ISOUEFI=TRUE"
+	case "$FIRMWARE" in uefi*) [ -z "$EFI_OPTS" ] && bt_fail "FIRMWARE=$FIRMWARE but $ISODATA has no efiboot.img - build with ISOUEFI=TRUE" ;; esac
 
 	# shellcheck disable=SC2086
 	( cd "$WORK/iso" && xorriso -as mkisofs -r -J -joliet-long -l \
@@ -249,12 +258,14 @@ bt_boot() {
 	DISK=""
 	[ "$SCRATCH" = 1 ] && DISK="-drive file=$WORK/scratch.img,format=raw,if=ide,index=1"
 	FW=""
-	if [ "$FIRMWARE" = uefi ]; then
+	case "$FIRMWARE" in uefi*)
 		[ -r "$OVMF_CODE" ] || bt_skip "no OVMF firmware at $OVMF_CODE"
 		cp -f "$OVMF_VARS" "$WORK/OVMF_VARS.fd"
 		FW="-drive if=pflash,format=raw,readonly=on,file=$OVMF_CODE -drive if=pflash,format=raw,file=$WORK/OVMF_VARS.fd"
-		echo "   firmware: UEFI ($OVMF_CODE)"
-	fi
+		# the secboot firmware needs a machine with SMM for its variable store
+		[ "$FIRMWARE" = uefi-secure ] && FW="-machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on $FW"
+		echo "   firmware: $FIRMWARE ($OVMF_CODE)" ;;
+	esac
 	# shellcheck disable=SC2086
 	qemu-system-x86_64 -accel tcg,thread=multi,tb-size=1024 -m 3072 -smp 4 $FW \
 	  -cdrom "$WORK/boot-test.iso" -boot d $DISK -display none -vga std \

@@ -1,3 +1,10 @@
 For manual (copying) USB install UEFI-boot, copy the folders EFI, boot, live, and the file grub.cfg to the root (/) of a FAT32 formatted partition, e.g. /mnt/sdb1.
 And it should boot, no bootloader install stuff required.
 
+Secure Boot: the build replaces the grub in EFI/boot with Debian's signed one
+(and refreshes shim and MokManager) when it can reach the Debian archive, so
+the ISO and a USB stick made from it boot with Secure Boot on and nothing to
+enrol. The files shipped in this directory are the fallback for a build made
+without network; with those, Secure Boot needs puppy.cer enrolled through
+MokManager on first boot. Either way, for a hand-made USB stick copy EFI, boot
+and live to the root of the FAT32 partition as before.
