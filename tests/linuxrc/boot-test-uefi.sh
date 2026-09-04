@@ -10,11 +10,12 @@
 #
 # Needs an isodata built with ISOUEFI=TRUE; skips otherwise.
 NAME=${NAME:-uefi}
-FIRMWARE=uefi
+FIRMWARE=${FIRMWARE:-uefi}
 REPORT='
 echo "EFI=$(test -d /sys/firmware/efi && echo YES || echo NO)"
 echo "EFIBITS=$(cat /sys/firmware/efi/fw_platform_size 2>/dev/null)"
 echo "EFIVARS=$(ls /sys/firmware/efi/efivars 2>/dev/null | wc -l)"
+echo "SECUREBOOT=$(od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | tr -d " ")"
 echo "EFIVARFS_MOUNT=$(findmnt -n -o FSTYPE /sys/firmware/efi/efivars 2>/dev/null || echo NONE)"
 echo "EFIVARFS_MODULE=$(modprobe efivarfs 2>&1 && echo LOADED || echo FAILED)"
 echo "EFIVARFS_MANUAL=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1 && ls /sys/firmware/efi/efivars | wc -l || echo MOUNTFAIL)"
@@ -38,6 +39,10 @@ echo "-- it was an EFI boot, not a BIOS fallback"
 bt_check "the kernel runs with EFI runtime services" '^EFI=YES$'
 bt_check "64-bit firmware"                            '^EFIBITS=64$'
 bt_check "EFI variables are visible"                  '^EFIVARS=[1-9]'
+if [ "$FIRMWARE" = uefi-secure ]; then
+	echo "-- with Secure Boot enforced: only Microsoft-signed shim and a grub it trusts got this far"
+	bt_check "the firmware reports Secure Boot on"      '^SECUREBOOT=1$'
+fi
 echo "-- and the live system is the same one"
 bt_check "squashfs modules are mounted"               '^SQFS=[1-9]'
 bt_check "the initrd found the medium"                '^BOOTDEV=/mnt/'

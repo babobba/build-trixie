@@ -28,6 +28,7 @@ run pxe            $T/boot-test-pxe.sh
 run image          $T/boot-test-image.sh
 run modules        $T/boot-test-modules.sh
 run uefi           $T/boot-test-uefi.sh
+run uefi-secure    $T/boot-test-uefi.sh     NAME=uefi-secure FIRMWARE=uefi-secure
 
 echo
 echo "boot tests: $pass passed, $fail failed, $skip not on this branch"

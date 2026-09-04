@@ -334,7 +334,7 @@ if [ $(command -v apt-get 2>/dev/null) ];then
  echo -e "\e[0;36mUpdate the package lists...\033[0m"
  apt-get update
  echo -e "\e[0;36mInstall some required packages, e.g. xz-utils, wget, squashfs-tools, etc...\033[0m"
- apt-get install wget xz-utils squashfs-tools cpio xorriso isolinux gpgv -y
+ apt-get install wget xz-utils squashfs-tools cpio xorriso isolinux gpgv mtools dosfstools -y
  ok_or_failed
 fi
 
@@ -1086,6 +1086,51 @@ rm -rf apt 2> /dev/null
 echo -e "\e[0;36mFinally creating ISO...\033[0m"
 
 if [ "$ISOUEFI" = "TRUE" ]; then
+# Secure Boot. The EFI image in isodata-uefi carries Debian's shim (signed
+# by Microsoft) but a grub signed with a Puppy Linux key, which that shim
+# does not trust: a machine with Secure Boot on stops at MokManager until
+# someone enrols puppy.cer. Debian signs a grub the shim does trust, and the
+# variant it builds for removable media (gcdx64) has /boot/grub as its
+# prefix on whatever device it was loaded from - for an ISO, this EFI image.
+# So the image gets a stub /boot/grub/grub.cfg that finds the medium by
+# /live/vmlinuz1 and hands over to its real menu, which is what live-build
+# does with the same binaries. The signed set is fetched through the
+# chroot's apt at build time rather than kept in the repository, so it
+# tracks Debian's updates; a build without network keeps the shipped set.
+# The 32-bit loaders stay as shipped: Debian signs no ia32 shim.
+echo -e "\e[0;36mFetching Debian's signed shim and grub for Secure Boot\033[0m"
+SB=chroot/tmp/sb; rm -rf $SB; mkdir -p $SB/x
+# the package lists were removed from the chroot by now; fetch them again
+if chroot chroot sh -c 'cd /tmp/sb && apt-get -qq update && apt-get -qq download shim-signed shim-helpers-amd64-signed grub-efi-amd64-signed' >/dev/null 2>&1 \
+   && for d in $SB/*.deb; do dpkg-deb -x "$d" $SB/x || exit 1; done \
+   && [ -f $SB/x/usr/lib/shim/shimx64.efi.signed ] && [ -f $SB/x/usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed ]; then
+cp -f $SB/x/usr/lib/shim/shimx64.efi.signed isodata/EFI/boot/bootx64.efi
+cp -f $SB/x/usr/lib/shim/mmx64.efi.signed   isodata/EFI/boot/mmx64.efi
+# not fbx64.efi: that is shim's fallback loader, which shim runs first when
+# started from the removable-media path, and it registers boot entries from
+# BOOT.CSV files and resets the machine - on a live medium that is a reboot
+# loop before grub ever runs. Debian's own live images leave it out too.
+cp -f $SB/x/usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed isodata/EFI/boot/grubx64.efi
+mkdir -p $SB/img/boot/grub
+cat > $SB/img/boot/grub/grub.cfg <<'STUB'
+# Read by Debian's signed grub from the EFI boot image when the ISO is
+# booted: find the medium, then use its menu.
+search --no-floppy --set=root --file /live/vmlinuz1
+set prefix=($root)/boot/grub
+configfile ($root)/boot/grub/grub.cfg
+STUB
+rm -f isodata/efiboot.img
+dd if=/dev/zero of=isodata/efiboot.img bs=1M count=16 status=none
+mkfs.vfat -F 16 -n EFIBOOT isodata/efiboot.img >/dev/null
+mmd -i isodata/efiboot.img ::/EFI ::/EFI/boot ::/boot ::/boot/grub
+mcopy -i isodata/efiboot.img isodata/EFI/boot/* ::/EFI/boot/
+mcopy -i isodata/efiboot.img $SB/img/boot/grub/grub.cfg ::/boot/grub/
+echo "  EFI/boot: $(ls isodata/EFI/boot | tr '\n' ' ')"
+ok_or_failed
+else
+echo -e "\e[0;33mCould not fetch the signed bootloaders - keeping the shipped EFI image (Secure Boot will need puppy.cer enrolled)\033[0m"
+fi
+rm -rf $SB
 xorriso -dev DebLive_trixie-$ARCH-UEFI.iso \
 -compliance "iso_9660_level=3:iso_9660_1999" \
 -map isodata / \
