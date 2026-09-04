@@ -21,9 +21,12 @@ echo 0 >/proc/sys/kernel/printk
 # When the kernel needs a module it did not get told about - an nls table
 # for a FAT mount, a cipher for dm-crypt, a filesystem named on a mount -
 # it runs /sbin/modprobe, and this initrd has never had one: busybox's
-# applets live in /bin. Point the kernel at the one that exists, so that
-# on-demand loading works here as it does on the installed system.
-[ -x /sbin/modprobe ] || echo /bin/modprobe > /proc/sys/kernel/modprobe
+# applets live in /bin. Give it one. Not by pointing the kernel at
+# /bin/modprobe through /proc/sys/kernel/modprobe: that setting survives
+# the pivot into the real root, where modprobe is in /sbin and /bin has
+# none, and every module the kernel asked for on the running system -
+# efivarfs, nls tables, ciphers - then failed to load, silently.
+[ -e /sbin/modprobe ] || { mkdir -p /sbin; ln -s /bin/busybox /sbin/modprobe; }
 
 echo "`cat /proc/cmdline|sed -e 's/^/ /'`" > /etc/cmdline
 param() { egrep -qo " $1( |\$)" /etc/cmdline; }
