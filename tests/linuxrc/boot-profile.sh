@@ -104,7 +104,34 @@ bt_extra_setup() {
 			      -e 's|^exit 0$|prof "rc.local: done"\nexit 0|' "$X/etc/rc.local"; } > "$RC/etc/rc.local"
 			chmod 755 "$RC/etc/rc.local"
 		fi
-		echo "   fine mode: per-modprobe stamps, stamped /etc/profile and openbox autostart"
+		# Every init script sources /lib/lsb/init-functions, which sources
+		# /lib/lsb/init-functions.d and, if present, /etc/lsb-base-logging.sh.
+		# Two hook files there stamp each script's begin and exit and each
+		# log_* message it prints, so the sysvinit rc phase is visible
+		# script by script (on the systemd image only the LSB services it
+		# runs stamp, which is still informative). The first scripts run
+		# before /proc and /dev exist, so a stamp falls back to the wall
+		# clock and a file on the root, which the report prints aligned.
+		mkdir -p "$RC/usr/lib/lsb/init-functions.d"
+		cat > "$RC/usr/lib/lsb/init-functions.d/00-boot-profile" <<'HOOK'
+_prof_script() {
+	_wall=$(date +%s.%N 2>/dev/null)
+	if read _up _ < /proc/uptime 2>/dev/null; then _line="PROF $_up initscript $* [wall $_wall]"; else _line="PROFWALL $_wall initscript $*"; fi
+	if [ -c /dev/ttyS0 ]; then echo "$_line" > /dev/ttyS0; else echo "$_line" >> /boot-profile-early.log; fi
+}
+_prof_script "begin $0 $1"
+trap '_prof_script "exit $0"' EXIT
+HOOK
+		cat > "$RC/etc/lsb-base-logging.sh" <<'HOOK'
+_prof() { _wall=$(date +%s.%N); if read _up _ < /proc/uptime 2>/dev/null; then echo "PROF $_up initscript $* [wall $_wall]" > /dev/ttyS0; else echo "PROFWALL $_wall initscript $*" > /dev/ttyS0; fi; }
+log_daemon_msg_pre()        { _prof "start: $1 ($2)"; }
+log_end_msg_post()          { _prof "end rc=$1"; }
+log_action_begin_msg_pre()  { _prof "start: $1"; }
+log_action_end_msg_post()   { _prof "end rc=$1"; }
+log_begin_msg_pre()         { _prof "start: $1"; }
+log_action_msg_pre()        { _prof "msg: $1"; }
+HOOK
+		echo "   fine mode: per-modprobe stamps, stamped /etc/profile, openbox autostart and every init script"
 	fi
 	# PROF_STRACE=1 traces the whole X session - openbox-session and every
 	# child - with strace, to attribute time that no script stamp can reach
@@ -221,6 +248,11 @@ if [ -s /tmp/session.strace ]; then
 		echo "---openbox: the 10 longest gaps between its own syscalls in that window---"
 		awk -v ob="$OBPID" '$1==ob { if (index($0,"openbox-autostart")) exit; split($2,t,":"); s=t[1]*3600+t[2]*60+t[3]; if (p!="") printf "  +%5.2fs after: %s\n", s-p, substr(prev,7,130); p=s; prev=$0 }' /tmp/session.strace | sort -rn | head -10
 	fi
+fi
+if [ -s /boot-profile-early.log ]; then
+	echo "---init scripts that ran before /proc and /dev existed (wall clock aligned to uptime)---"
+	read UPN _ < /proc/uptime; WN=$(date +%s.%N); OFF=$(echo "$WN - $UPN" | bc 2>/dev/null || awk -v w=$WN -v u=$UPN 'BEGIN{printf "%.3f", w-u}')
+	awk -v off="$OFF" '$1=="PROFWALL" { printf "  %7.2fs  %s\n", $2-off, substr($0, index($0,$3)) } $1=="PROF" { printf "  %7.2fs  %s\n", $2, substr($0, index($0,$3)) }' /boot-profile-early.log | cut -c1-110
 fi
 echo "---kernel modules loaded now (initrd ships 360)---"
 echo "  $(lsmod | awk 'NR>1' | wc -l) loaded: $(lsmod | awk 'NR>1{print $1}' | sort | tr '\n' ' ')"
