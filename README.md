@@ -3,6 +3,13 @@
 
 See more info about usage and changes/fixes at https://forum.puppylinux.com/viewtopic.php?p=159033#p159033    
 
+#### Testing and profiling
+
+`docs/testing.md` describes the three test layers (unit tests for the initrd
+scripts, image tests on the built squashfs, boot tests under QEMU by BIOS,
+UEFI and Secure Boot) and `docs/boot-profiling.md` the boot profiler and what
+it found. `tools/build-unattended` runs the build without a keyboard.
+
 #### Update 2025-11-29:    
 Added "extra-commands" script, will run inside chroot, based on the idea of @IdfbAn          
 
