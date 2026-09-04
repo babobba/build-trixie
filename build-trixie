@@ -924,9 +924,22 @@ fi
 # and mountdevsubfs.sh as "reload". insserv rewires the scripts that listed
 # it as a dependency (checkfs, cryptdisks, checkroot-bootclean) and rebuilds
 # the startpar dependency files, so the rest of rcS is unchanged.
+#
+# The same reasoning, second tier, each measured at under a second under
+# QEMU and a few hundredths on hardware, together about four seconds:
+#   checkfs.sh            fscks the filesystems in /etc/fstab; the image ships
+#                         an empty fstab and the initrd mounts what it finds
+#   cryptdisks-early,     unlock /etc/crypttab entries; the image ships none,
+#   cryptdisks            and encrypted changes= are unlocked by the initrd
+#   checkroot-bootclean,  bootclean runs three times, before and after the
+#   mountnfs-bootclean    mounts; with /tmp on the overlay (and so inside a
+#                         persistent changes=) it must run once, and the run
+#                         after local filesystems are mounted is the one kept
 if [ "$SYSTEMD" != "TRUE" ] && [ -x chroot/etc/init.d/checkroot.sh ]; then
-echo -e "\e[0;36mDisabling checkroot.sh - nothing for it to do on an overlay root\033[0m"
-chroot chroot update-rc.d checkroot.sh disable S 2>&1 | grep -v '^insserv: warning'
+echo -e "\e[0;36mDisabling the rcS scripts that have nothing to do on a live overlay root\033[0m"
+for s in checkroot.sh checkfs.sh cryptdisks-early cryptdisks checkroot-bootclean.sh mountnfs-bootclean.sh; do
+[ -x chroot/etc/init.d/$s ] && chroot chroot update-rc.d $s disable S 2>&1 | grep -v '^insserv: warning'
+done
 ok_or_failed
 fi
 
