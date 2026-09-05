@@ -82,11 +82,14 @@ rm -f "$LAUNCHDIR"/trixie/apt/archives/lock 2> /dev/null
    echo -e "\e[0;31mSomething went wrong, directory chroot cannot be removed\033[0m"
    echo -e "\e[0;31mMake sure it's not in use by some process and try again, exiting...\033[0m"
    sleep 2
-   exit
+   exit 1
    else
    rm -rf "$LAUNCHDIR"/trixie/chroot
    fi
-exit
+# a failure inside the chroot leaves chroot/exit_ and comes through here;
+# the status has to say so, or an unattended build reports success on an
+# image that was never made
+exit ${EXITRC:-0}
 }
 export -f exitfn
 
@@ -821,7 +824,7 @@ fi
 $CHROOT chroot /bin/bash -c chroot_in
 
 # do not continue if there were errors
-[ -f "chroot/exit_" ] && exitfn
+[ -f "chroot/exit_" ] && { EXITRC=1; exitfn; }
 
 ################################################
 ############ End running in chroot #############

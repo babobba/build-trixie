@@ -34,7 +34,10 @@ for cfg; do
 	t0=$(date +%s)
 	echo "== $name: building"
 	b=$(step "$d" build tools/build-unattended "$cfg" zstd)
+	# the build's own word is not enough: the image must be there
+	[ -s trixie/isodata/live/01-filesystem.squashfs ] && [ -s trixie/isodata/live/initrd1.xz ] || b=FAIL
 	if [ "$b" != ok ]; then
+		grep -aE '^E: |FAILED' "$d/build.log" | tail -5 | sed 's/^/build: /' >> "$d/findings.txt"
 		echo "$name build=FAIL ($(( $(date +%s) - t0 ))s)" | tee -a "$SUMMARY"
 		continue
 	fi

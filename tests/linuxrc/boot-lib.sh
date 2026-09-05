@@ -107,6 +107,7 @@ filter_modlist() {
 repack_initrd() {
 	IRD="$WORK/ird"; rm -rf "$IRD"; mkdir -p "$IRD"
 	IRD_FMT=$(bt_initrd_format "$WORK/iso/live/initrd1.xz")
+	case "$IRD_FMT" in xz|zstd) ;; *) bt_fail "$IRD_FMT" ;; esac
 	bt_initrd_unpack "$WORK/iso/live/initrd1.xz" "$IRD" || bt_fail "could not unpack initrd1.xz"
 	echo "   initrd is $IRD_FMT"
 	for f in linuxrc finit; do
@@ -182,6 +183,9 @@ PY
 
 bt_build() {
 	[ -d "$ISODATA/live" ] || bt_fail "no isodata at $ISODATA - run build-trixie first"
+	for f in vmlinuz1 initrd1.xz 01-filesystem.squashfs; do
+		[ -s "$ISODATA/live/$f" ] || bt_fail "no $f in $ISODATA/live - the build did not finish"
+	done
 	echo "== building test ISO ($NAME)"
 	rm -rf "$WORK"; mkdir -p "$WORK"
 	cp -a "$ISODATA" "$WORK/iso" || bt_fail "could not copy isodata"
