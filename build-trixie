@@ -927,6 +927,8 @@ relink default_file-browser /usr/bin/pcmanfm /usr/bin/pcmanfm-qt /usr/bin/Thunar
 relink default_image-viewer /usr/bin/viewnior /usr/bin/gpicview /usr/bin/feh /usr/bin/mirage /usr/bin/ristretto /usr/bin/eog /usr/bin/lximage-qt
 relink default_virtual-terminal.icon /usr/share/pixmaps/console48.png /usr/share/pixmaps/xterm-color_48x48.xpm /usr/share/pixmaps/xterm_48x48.xpm /usr/share/pixmaps/debian-logo.png
 relink defaultimageviewer default_image-viewer
+relink default_image-editor /usr/bin/mtpaint /usr/bin/gimp /usr/bin/pinta /usr/bin/kolourpaint /usr/bin/azpainter /usr/bin/lximage-qt
+relink defaultimageeditor default_image-editor
 
 # A hand-built package (pburn) ships 32-bit programs; on this image they
 # cannot start at all and would only ever fail. Where busybox has an applet
