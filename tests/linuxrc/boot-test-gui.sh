@@ -52,12 +52,12 @@ bt_build
 bt_boot
 
 echo "== results"
-grep -E '^GUI ' "$SER.clean" | sed 's/^/   | /'
+grep -a -E '^GUI ' "$SER.clean" | sed 's/^/   | /'
 bt_check "the probe ran in a display"         '^GUI [^ ]* '
 bt_check_not "the session had a display"      '^GUI-NODISPLAY'
 bt_check_not "xdotool is on the image"        '^GUI-NOXDOTOOL'
 bt_check "the probe ran to the end"           '^GUI-DONE [1-9]'
-echo "   $(grep -c '^GUI [^ ]* OK' "$SER.clean") opened a window, $(grep -c '^GUI [^ ]* NOWINDOW' "$SER.clean") did not, $(grep -c '^GUI [^ ]* SKIP' "$SER.clean") skipped"
+echo "   $(grep -a -c '^GUI [^ ]* OK' "$SER.clean") opened a window, $(grep -a -c '^GUI [^ ]* NOWINDOW' "$SER.clean") did not, $(grep -a -c '^GUI [^ ]* SKIP' "$SER.clean") skipped"
 bt_check "at least five programs opened a window" '^GUI-DONE \([5-9]\|[1-9][0-9]\)'
 bt_check "pcmanfm opened a window"            '^GUI pcmanfm OK'
 bt_check_not "every program opened a window"  '^GUI [^ ]* NOWINDOW'

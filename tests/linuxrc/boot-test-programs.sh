@@ -36,8 +36,8 @@ bt_boot
 
 echo "== results"
 bt_check "the probe ran to the end" '^PROBED [0-9]'
-grep -E '^(PROBE [^ ]+ (FAIL|TIMEOUT)|TUI [^ ]+ FAIL|PKG-MISSING)' "$SER.clean" | sed 's/^/   | /'
-echo "   probed: $(sed -n 's/^PROBED //p' "$SER.clean" | head -1) programs, $(grep -c '^PROBE [^ ]* OK' "$SER.clean") ok, $(grep -c '^PROBE [^ ]* SKIP' "$SER.clean") on the denylist; TUI: $(grep -c '^TUI [^ ]* OK' "$SER.clean") ok, $(grep -c '^TUI [^ ]* SKIP' "$SER.clean") absent"
+grep -a -E '^(PROBE [^ ]+ (FAIL|TIMEOUT)|TUI [^ ]+ FAIL|PKG-MISSING)' "$SER.clean" | sed 's/^/   | /'
+echo "   probed: $(sed -n 's/^PROBED //p' "$SER.clean" | head -1) programs, $(grep -a -c '^PROBE [^ ]* OK' "$SER.clean") ok, $(grep -a -c '^PROBE [^ ]* SKIP' "$SER.clean") on the denylist; TUI: $(grep -a -c '^TUI [^ ]* OK' "$SER.clean") ok, $(grep -a -c '^TUI [^ ]* SKIP' "$SER.clean") absent"
 
 echo "-- packages and programs"
 bt_check_not "every package the config names is installed" '^PKG-MISSING '
