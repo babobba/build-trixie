@@ -85,6 +85,8 @@ done
 n=0
 for f in $(sort -u /tmp/probe-list); do
 	p=${f##*/}
+	# the build removes pet2tgz, pburn's 32-bit binary, on purpose
+	case $p in pet2tgz) echo "PROBE $p SKIP rc=- removed-by-the-build"; continue ;; esac
 	[ -e "$f" ] || { echo "PROBE $p FAIL rc=- shipped-but-absent $f"; continue; }
 	[ -x "$f" ] && [ ! -d "$f" ] || continue
 	deny "$p" && { echo "PROBE $p SKIP rc=- denylist"; continue; }

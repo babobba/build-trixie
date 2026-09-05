@@ -60,7 +60,7 @@ echo "-- deleted files are only in the trees the build strips"
 # The udev vendor-name tables (20-OUI, 20-pci-vendor-model, 20-usb-vendor-model
 # and friends) are deleted as well and hwdb.bin rebuilt without them; that
 # file is generated, not shipped, so only the tables show up here.
-STRIPPED='^/usr/share/(doc|doc-base|man|info|locale|help|gnome/help|gtk-doc)/|^/usr/lib/udev/hwdb\.d/20-(OUI|pci-vendor-model|usb-vendor-model|bluetooth-vendor-product|acpi-vendor)\.hwdb$'
+STRIPPED='^/share/|^/usr/share/(doc|doc-base|man|info|locale|help|gnome/help|gtk-doc)/|^/usr/lib/udev/hwdb\.d/20-(OUI|pci-vendor-model|usb-vendor-model|bluetooth-vendor-product|acpi-vendor)\.hwdb$'
 UNEXPECTED_MISSING=$(awk '$1=="missing"{print $NF}' "$WORK/verify" \
 	| grep -Ev "$STRIPPED" | sort -u)
 NMISS=$(awk '$1=="missing"' "$WORK/verify" | wc -l | tr -d ' ')
@@ -68,6 +68,11 @@ echo "   $NMISS files reported missing in total"
 # /opt/tmp holds build scratch from a DebianDog package and is removed during
 # cleaning; the package still lists it, so it shows up here.
 UNEXPECTED_MISSING=$(echo "$UNEXPECTED_MISSING" | grep -v '^/opt/tmp' | tr '\n' ' ')
+# Files the build itself removes, each with its reason:
+#   /usr/bin/pet2tgz   pburn's 32-bit binary, which cannot start on this image
+#   /share/...         a hand-built package's doc under a top-level /share
+REMOVED_BY_BUILD="/usr/bin/pet2tgz"
+UNEXPECTED_MISSING=$(for f in $UNEXPECTED_MISSING; do echo " $REMOVED_BY_BUILD " | grep -q " $f " || echo "$f"; done | tr '\n' ' ')
 # A file another package's maintainer script removes on purpose (camphonetab
 # drops libmtp's udev rule so mtp-probe stays off the phones it handles) is
 # missing by design; the script that names it is the documentation.
