@@ -5,13 +5,21 @@
 # nested "$(...)" and backtick commands are emitted as their own segments.
 function push(s) { sp++; st[sp] = s }
 function pop()    { if (sp > 0) sp-- }
-BEGIN { sp = 0; st[0] = "N"; hd = "" }
+BEGIN { sp = 0; st[0] = "N"; hd = ""; cont = 0 }
 {
-	line = $0
-	if (hd != "") { if (line ~ ("^[[:space:]]*" hd "$")) hd = ""; next }
-	# the pattern half of a case arm is not a command
-	if (st[sp] == "N" && line ~ /^[^()]*\)/) sub(/^[^()]*\)/, "", line)
-	out = ""; n = length(line); prev = " "
+	line = $0; sub(/\r$/, "", line)
+	if (hd != "") { if (line ~ ("^[[:space:]]*" hd "[[:space:]]*$")) hd = ""; next }
+	# after a line ending in a backslash the next line continues the same
+	# command: its first word is an argument, not a command
+	# a line that begins inside a string (a multi-line gtkdialog layout, a
+	# yad --text) is the middle of an argument: whatever follows the string's
+	# end on that line is not a command either
+	wascont = cont; cont = 0; out = (wascont || st[sp] != "N") ? "_ " : ""
+	if (line ~ /(^|[^\\])(\\\\)*\\$/) cont = 1
+	# the pattern half of a case arm is not a command - but only at the top
+	# level: inside an open $( ... ) a line ending in ")" closes it
+	if (sp == 0 && !wascont && st[sp] == "N" && line ~ /^[^()]*\)/) sub(/^[^()]*\)/, "", line)
+	n = length(line); prev = " "
 	for (i = 1; i <= n; i++) {
 		c = substr(line, i, 1); c2 = substr(line, i, 2); s = st[sp]
 		if (s == "S") { if (c == "'") pop(); continue }

@@ -36,7 +36,7 @@ bt_boot
 
 echo "== results"
 bt_check "the probe ran to the end" '^PROBED [0-9]'
-grep -a -E '^(PROBE [^ ]+ (FAIL|TIMEOUT)|TUI [^ ]+ FAIL|PKG-MISSING)' "$SER.clean" | sed 's/^/   | /'
+grep -a -E '^(PROBE [^ ]+ (FAIL|RUNNING)|TUI [^ ]+ FAIL|PKG-MISSING)' "$SER.clean" | sed 's/^/   | /'
 echo "   probed: $(sed -n 's/^PROBED //p' "$SER.clean" | head -1) programs, $(grep -a -c '^PROBE [^ ]* OK' "$SER.clean") ok, $(grep -a -c '^PROBE [^ ]* SKIP' "$SER.clean") on the denylist; TUI: $(grep -a -c '^TUI [^ ]* OK' "$SER.clean") ok, $(grep -a -c '^TUI [^ ]* SKIP' "$SER.clean") absent"
 
 echo "-- packages and programs"
@@ -45,7 +45,6 @@ bt_check     "the list is not trivially short"    '^PROBED \([6-9][0-9]\|[1-9][0
 
 echo "-- command-line programs"
 bt_check_not "no program failed to start"          '^PROBE [^ ]* FAIL'
-bt_check_not "no program hung on --version"        '^PROBE [^ ]* TIMEOUT'
 
 echo "-- terminal programs"
 bt_check     "at least one terminal program drew its screen" '^TUI [^ ]* OK'

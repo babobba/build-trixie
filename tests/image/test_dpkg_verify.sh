@@ -60,7 +60,7 @@ echo "-- deleted files are only in the trees the build strips"
 # The udev vendor-name tables (20-OUI, 20-pci-vendor-model, 20-usb-vendor-model
 # and friends) are deleted as well and hwdb.bin rebuilt without them; that
 # file is generated, not shipped, so only the tables show up here.
-STRIPPED='^/usr/share/(doc|doc-base|man|info|locale|help|gnome/help)/|^/usr/lib/udev/hwdb\.d/20-(OUI|pci-vendor-model|usb-vendor-model|bluetooth-vendor-product|acpi-vendor)\.hwdb$'
+STRIPPED='^/usr/share/(doc|doc-base|man|info|locale|help|gnome/help|gtk-doc)/|^/usr/lib/udev/hwdb\.d/20-(OUI|pci-vendor-model|usb-vendor-model|bluetooth-vendor-product|acpi-vendor)\.hwdb$'
 UNEXPECTED_MISSING=$(awk '$1=="missing"{print $NF}' "$WORK/verify" \
 	| grep -Ev "$STRIPPED" | sort -u)
 NMISS=$(awk '$1=="missing"' "$WORK/verify" | wc -l | tr -d ' ')
@@ -68,6 +68,14 @@ echo "   $NMISS files reported missing in total"
 # /opt/tmp holds build scratch from a DebianDog package and is removed during
 # cleaning; the package still lists it, so it shows up here.
 UNEXPECTED_MISSING=$(echo "$UNEXPECTED_MISSING" | grep -v '^/opt/tmp' | tr '\n' ' ')
+# A file another package's maintainer script removes on purpose (camphonetab
+# drops libmtp's udev rule so mtp-probe stays off the phones it handles) is
+# missing by design; the script that names it is the documentation.
+UNEXPECTED_MISSING=$(for f in $UNEXPECTED_MISSING; do
+	by=$(grep -lF "$(basename "$f")" "$ROOT"/var/lib/dpkg/info/*.postinst "$ROOT"/var/lib/dpkg/info/*.preinst 2>/dev/null | head -1)
+	[ -n "$by" ] && { echo "   $f removed by $(basename "$by")" >&2; continue; }
+	echo "$f"
+done | tr '\n' ' ')
 assert_empty "nothing is missing outside the stripped trees" "$UNEXPECTED_MISSING"
 
 echo "-- files whose contents changed since their package installed them"
@@ -96,9 +104,29 @@ KNOWN_CHANGED="
 /usr/share/icons/hicolor/icon-theme.cache
 "
 CHANGED=$(awk '$1!="missing"{print $NF}' "$WORK/verify" | sort -u)
+# Three more kinds of change explain themselves from the image:
+#  - a dpkg diversion (live-tools diverts update-initramfs): the file at the
+#    path is another package's by design;
+#  - a file another package's maintainer script edits (lxinputsave rewrites
+#    lxinput.desktop): the script that names it is the documentation;
+#  - a file of a hand-built package, one whose Maintainer field carries no
+#    address (fredx181, root@wheezy, rcrsn51 - the DebianDog packages): their
+#    md5sums are what did not keep up with their files, not the image.
+DIVERTED=$(awk 'NR % 3 == 1' "$ROOT/var/lib/dpkg/diversions" 2>/dev/null)
+owner_of() {   # FILE -> package name, from the .list files
+	grep -lx -- "$1" "$ROOT"/var/lib/dpkg/info/*.list 2>/dev/null | head -1 | sed 's|.*/||; s/\.list$//; s/:amd64$//'
+}
+handbuilt() {  # PACKAGE -> 0 when its Maintainer has no <address>
+	awk -v p="$1" 'BEGIN{RS=""} $1=="Package:" && $2==p { m=""; if (match($0, /Maintainer: [^\n]*/)) m=substr($0, RSTART, RLENGTH); exit !(m !~ /</) }' "$ROOT/var/lib/dpkg/status"
+}
 UNEXPECTED_CHANGED=""
 for f in $CHANGED; do
 	echo "$KNOWN_CHANGED" | grep -qx -- "$f" && continue
+	echo "$DIVERTED" | grep -qx -- "$f" && { echo "   $f is diverted"; continue; }
+	by=$(grep -lF "$(basename "$f")" "$ROOT"/var/lib/dpkg/info/*.postinst "$ROOT"/var/lib/dpkg/info/*.preinst 2>/dev/null | grep -v "/$(owner_of "$f")\." | head -1)
+	[ -n "$by" ] && { echo "   $f edited by $(basename "$by")"; continue; }
+	pkg=$(owner_of "$f")
+	[ -n "$pkg" ] && handbuilt "$pkg" && { echo "   $f belongs to $pkg, a hand-built package"; continue; }
 	UNEXPECTED_CHANGED="$UNEXPECTED_CHANGED $f"
 done
 # The Devuan archive keyrings used to appear here. The dog-boot overlay carried
@@ -111,7 +139,10 @@ done
 assert_empty "no undocumented content change" "$(echo $UNEXPECTED_CHANGED)"
 
 echo "-- and the list of expected changes has not gone stale"
+# an entry for a file this config does not install (jwm's menu method on an
+# openbox image) is neither stale nor checkable here
 for f in $KNOWN_CHANGED; do
+	[ -e "$ROOT$f" ] || continue
 	echo "$CHANGED" | grep -qx -- "$f" \
 		|| _fail "$f is still listed as changed" "it no longer differs - drop it from the list"
 done
