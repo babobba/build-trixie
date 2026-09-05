@@ -13,6 +13,8 @@ it found. `tools/build-unattended` runs the build without a keyboard.
 the image can run, now implemented: `tests/image/test_executables.sh` and
 `tests/linuxrc/test_initrd_applets.sh` read the built image and initrd, and
 `boot-test-programs.sh` and `boot-test-gui.sh` start the programs in a guest.
+`docs/config-checks.md` is where every config stands after going through all of
+them, and `tools/check-configs` is how that table was made.
 
 #### Update 2025-11-29:    
 Added "extra-commands" script, will run inside chroot, based on the idea of @IdfbAn          
