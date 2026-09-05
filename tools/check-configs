@@ -1,0 +1,54 @@
+#!/bin/sh
+# Build each config and run every check on what it built, one config after
+# another.
+#
+#     tools/check-configs [configs-trixie/NAME.conf ...]
+#
+# With no arguments every config is taken. Per config: the build
+# (tools/build-unattended, zstd), the image tests, the initrd test, the
+# programs boot test and - when the config installs an X server - the GUI
+# boot test. Logs go under RESULTS (default /tmp/check-configs) as
+# NAME/STEP.log with the exit status in NAME/STEP.rc, the FAIL lines of
+# every step in NAME/findings.txt, and one line per config in summary.txt.
+# SKIP_GUI=1 leaves the GUI test out. A failed build skips the rest of that
+# config. Each config takes most of an hour under emulation, so this is an
+# overnight run; the summary can be read while it goes.
+cd "$(dirname "$0")/.." || exit 1
+RESULTS=${RESULTS:-/tmp/check-configs}
+mkdir -p "$RESULTS"
+SUMMARY="$RESULTS/summary.txt"
+[ $# -gt 0 ] || set -- configs-trixie/*.conf
+
+step() {   # DIR NAME COMMAND... -> ok | FAIL
+	_d=$1; _n=$2; shift 2
+	"$@" > "$_d/$_n.log" 2>&1; _rc=$?
+	echo $_rc > "$_d/$_n.rc"
+	grep -aE '^ *(FAIL|PROBE [^ ]+ (FAIL|TIMEOUT)|TUI [^ ]+ FAIL|GUI [^ ]+ NOWINDOW|PKG-MISSING|unexpected:| *\| GUI [^ ]+ NOWINDOW)' "$_d/$_n.log" \
+		| sed "s/^/$_n: /" >> "$_d/findings.txt"
+	[ $_rc = 0 ] && echo ok || echo FAIL
+}
+
+for cfg; do
+	name=$(basename "$cfg" .conf)
+	d="$RESULTS/$name"; rm -rf "$d"; mkdir -p "$d"; : > "$d/findings.txt"
+	t0=$(date +%s)
+	echo "== $name: building"
+	b=$(step "$d" build tools/build-unattended "$cfg" zstd)
+	if [ "$b" != ok ]; then
+		echo "$name build=FAIL ($(( $(date +%s) - t0 ))s)" | tee -a "$SUMMARY"
+		continue
+	fi
+	echo "== $name: checking"
+	i=$(step "$d" image sh tests/image/run.sh)
+	r=$(step "$d" initrd sh tests/linuxrc/test_initrd_applets.sh)
+	p=$(step "$d" programs env CONFIG="$cfg" sh tests/linuxrc/boot-test-programs.sh)
+	if grep -q xserver "$cfg" && [ "${SKIP_GUI:-0}" != 1 ]; then
+		g=$(step "$d" gui env CONFIG="$cfg" sh tests/linuxrc/boot-test-gui.sh)
+	else
+		g=skipped
+	fi
+	line="$name build=ok image=$i initrd=$r programs=$p gui=$g ($(( $(date +%s) - t0 ))s)"
+	echo "$line" | tee -a "$SUMMARY"
+	[ -s "$d/findings.txt" ] && sed 's/^/   /' "$d/findings.txt" | head -20
+done
+echo "== done: $SUMMARY"
