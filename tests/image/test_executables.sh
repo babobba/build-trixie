@@ -178,7 +178,8 @@ for f in "$OV"/usr/local/bin/* "$OV"/usr/local/sbin/*; do
 				ch sh -c "command -v -- '$w' >/dev/null 2>&1" && continue
 				# a script that asks which/command -v/type for it first has
 				# made it optional itself
-				grep -qE "(which|command -v|type)[[:space:]]+(-[a-z]+[[:space:]]+)?$w([^A-Za-z0-9_.+-]|$)|-[xef][[:space:]]+[^[:space:]]*/$w([^A-Za-z0-9_.+-]|$)" "$f" && continue
+				# ... or asks pidof/pgrep whether it is running before restarting it
+				grep -qE "(which|command -v|type|pidof|pgrep)[[:space:]]+(-[a-z]+[[:space:]]+)?$w([^A-Za-z0-9_.+-]|$)|-[xef][[:space:]]+[^[:space:]]*/$w([^A-Za-z0-9_.+-]|$)" "$f" && continue
 				echo "$rel: $w" >> "$WORK/script-cmds.txt"
 			  done ;;
 	esac
