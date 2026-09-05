@@ -88,6 +88,11 @@ copy_including_deps /$LMK/kernel/fs/reiserfs
 copy_including_deps /$LMK/kernel/fs/squashfs
 copy_including_deps /$LMK/kernel/crypto
 copy_including_deps /$LMK/kernel/fs/btrfs
+## xfs and f2fs are in initrd-src/modlist; without the modules here mkinitrd
+## drops them from the built modlist without a word and the boot cannot read
+## a save file or a root on either.
+copy_including_deps /$LMK/kernel/fs/xfs
+copy_including_deps /$LMK/kernel/fs/f2fs
 
 # crc32c is needed for ext4, but I don't know which one, add them all, they are small
 find /$LMK/kernel/ | grep crc32c | while read LINE; do
@@ -206,6 +211,13 @@ copy_including_deps /$LMK/updates
 
 copy_including_deps /$LMK/modules.*
 
+
+## The tarball's cryptsetup is static, but it comes with Debian's askpass
+## helper as a 32-bit binary asking for /lib/ld-linux.so.2, which the tree
+## does not have. Nothing in linuxrc calls it, and it could not run if
+## something did.
+rm -f $INITRAMFS/lib/cryptsetup/askpass
+rmdir $INITRAMFS/lib/cryptsetup 2>/dev/null
 
 find $INITRAMFS -name "*.ko.gz" -exec gunzip {} \;
 find $INITRAMFS -name "*.ko.xz" -exec xz -d {} \;

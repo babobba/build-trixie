@@ -582,12 +582,12 @@ echo -e "\e[0;36mInstall keyboard-configuration and more required packages\033[0
 # installed but idle, and the 00systemd pin keeps it from coming back.
 # libelogind-compat is Devuan-only and not needed: on Debian libelogind0 and
 # libsystemd0 coexist.
-apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration initscripts sysvinit-core xz-utils zstd cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget elogind libelogind0 libpam-elogind udev systemd- systemd-sysv- libpam-systemd- --yes
+apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration initscripts sysvinit-core xz-utils zstd adequate cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget elogind libelogind0 libpam-elogind udev systemd- systemd-sysv- libpam-systemd- --yes
 
 else
 rm -f /etc/apt/preferences.d/00systemd
 echo -e "\e[0;36mInstall keyboard-configuration and more required packages\033[0m"
-apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration xz-utils zstd cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget systemd systemd-sysv libpam-systemd udev --yes
+apt-get install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" keyboard-configuration xz-utils zstd adequate cryptsetup cryptsetup-bin gnupg dirmngr apt-utils wget systemd systemd-sysv libpam-systemd udev --yes
 fi
 
 # commented out all below as the google signing key is nowadays automatically added
@@ -903,6 +903,16 @@ echo -e "\e[0;36mCopy contents (if exist) of rootcopy directory...\033[0m"
 find ../rootcopy -mindepth 1 ! -name ReadMe -exec cp -af "{}" chroot/ \; 2> /dev/null
 
 export nmu=""  # no-merged-usr not supported anymore post-bookworm
+
+# pfind ships /usr/local/bin/defaultfilemanager as a link to thunar, and its
+# result windows open folders through it; on a config with another file
+# manager the link dangles and nothing opens. Point it at the one installed.
+DFM=chroot/usr/local/bin/defaultfilemanager
+if [ -L $DFM ] && ! chroot chroot test -e /usr/local/bin/defaultfilemanager; then
+for fm in pcmanfm pcmanfm-qt thunar nautilus caja nemo; do
+chroot chroot test -x /usr/bin/$fm && { ln -sfn /usr/bin/$fm $DFM; echo "defaultfilemanager -> /usr/bin/$fm"; break; }
+done
+fi
 
 # systemd's ConditionNeedsUpdate: ldconfig.service and systemd-update-done
 # run at boot whenever /etc/.updated is older than /usr, and on a live system
