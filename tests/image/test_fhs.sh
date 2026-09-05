@@ -72,8 +72,12 @@ done
 assert_empty "no undocumented ELF binary under /etc" "$ELF"
 # The exception must still describe reality; a stale entry would silently widen
 # the check.
+# ... unless the config does not install the package at all (xfce4 has no
+# peasywifi), in which case there is nothing to see and nothing stale.
+KNOWN_PRESENT=""
+for k in $ETC_ELF_KNOWN; do [ -e "$ROOT$k" ] && KNOWN_PRESENT="$KNOWN_PRESENT $k"; done
 assert_equal "the documented exception is still the one that is there" \
-	"$(echo $ETC_ELF_KNOWN)" "$(echo $KNOWN_SEEN)"
+	"$(echo $KNOWN_PRESENT)" "$(echo $KNOWN_SEEN)"
 
 echo "-- removable media (FHS 3.11)"
 # FHS reserves /mnt for temporary mounts by the system administrator, and gives

@@ -119,10 +119,20 @@ owner_of() {   # FILE -> package name, from the .list files
 handbuilt() {  # PACKAGE -> 0 when its Maintainer has no <address>
 	awk -v p="$1" 'BEGIN{RS=""} $1=="Package:" && $2==p { m=""; if (match($0, /Maintainer: [^\n]*/)) m=substr($0, RSTART, RLENGTH); exit !(m !~ /</) }' "$ROOT/var/lib/dpkg/status"
 }
+#  - a file the build copies over the packages' from an overlay in the repo:
+#    dog-boot-trixie-* for every image, modules-trixie/DESKTOP for the
+#    desktop the config names (xfce4's menu). The overlay is the documentation.
+overlay_has() {   # FILE -> 0 when an overlay in the repo ships it
+	for o in "$REPO"/dog-boot-trixie-* "$REPO"/modules-trixie/*; do
+		[ -e "$o$1" ] && { echo "${o#$REPO/}"; return 0; }
+	done
+	return 1
+}
 UNEXPECTED_CHANGED=""
 for f in $CHANGED; do
 	echo "$KNOWN_CHANGED" | grep -qx -- "$f" && continue
 	echo "$DIVERTED" | grep -qx -- "$f" && { echo "   $f is diverted"; continue; }
+	o=$(overlay_has "$f") && { echo "   $f is shipped by $o"; continue; }
 	by=$(grep -lF "$(basename "$f")" "$ROOT"/var/lib/dpkg/info/*.postinst "$ROOT"/var/lib/dpkg/info/*.preinst 2>/dev/null | grep -v "/$(owner_of "$f")\." | head -1)
 	[ -n "$by" ] && { echo "   $f edited by $(basename "$by")"; continue; }
 	pkg=$(owner_of "$f")

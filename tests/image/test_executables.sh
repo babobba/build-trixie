@@ -137,6 +137,8 @@ assert_empty "no ELF file is missing a library" "$(head -8 "$WORK/ldd-missing.tx
 # ---------------------------------------------------------------- 3. scripts
 echo "-- the scripts in /usr/local: interpreter, syntax, and the programs they call"
 KEYWORDS="if then else elif fi for while until do done case esac in function return exit break continue local export set unset shift eval exec source trap read echo printf test true false cd pwd type command builtin let declare typeset readonly wait kill getopts hash times ulimit umask alias unalias pushd popd dirs jobs fg bg disown select time coproc mapfile readarray caller enable help logout suspend"
+# shell functions a script gets by sourcing gettext.sh
+KEYWORDS="$KEYWORDS eval_gettext eval_ngettext eval_pgettext eval_npgettext"
 # Programs a dog script calls that are not on every image and are checked for
 # at run time by the script itself, so their absence here is not a fault.
 # Commands a script probes for or provides itself, so their absence is not
