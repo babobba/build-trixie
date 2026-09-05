@@ -29,6 +29,11 @@ assert_grep "puppy's session calls the script" \
 assert_not_grep "the commands are not duplicated into openbox" \
 	"$WORK/union/root/.config/openbox/autostart" 'xterm'
 
+echo "-- and ~/Startup, which is the only hook jwm's session offers"
+assert_executable "root's Startup gets a runnable hook" "$WORK/union/root/Startup/guiexec-cheat"
+assert_grep "it runs the generated script" "$WORK/union/root/Startup/guiexec-cheat" '^exec /usr/local/bin/guiexec-cheat$'
+assert_executable "puppy's Startup gets one too" "$WORK/union/home/puppy/Startup/guiexec-cheat"
+
 echo "-- both entry points in one session start the commands once"
 assert_grep "the script takes a lock"        "$SCRIPT" 'mkdir /tmp/.guiexec-cheat-'
 assert_grep "the lock is keyed to the X server" "$SCRIPT" 'pgrep -x Xorg'

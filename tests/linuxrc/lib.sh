@@ -61,6 +61,7 @@ make_fakeroot() {
 		"$WORK/union/etc/rc.d" "$WORK/union/etc/xdg/autostart" \
 		"$WORK/union/root/.config/openbox" \
 		"$WORK/union/home/puppy/.config/openbox" \
+		"$WORK/union/root/Startup" "$WORK/union/home/puppy/Startup" \
 		"$WORK/union/usr/share/zoneinfo/Europe" "$WORK/tmp"
 	printf 'XKBMODEL="pc105"\nXKBLAYOUT="us"\nXKBVARIANT=""\nXKBOPTIONS=""\n' \
 		> "$WORK/union/etc/default/keyboard"
