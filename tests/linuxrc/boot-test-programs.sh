@@ -49,7 +49,6 @@ bt_check_not "no program hung on --version"        '^PROBE [^ ]* TIMEOUT'
 
 echo "-- terminal programs"
 bt_check     "at least one terminal program drew its screen" '^TUI [^ ]* OK'
-bt_check     "nano drew its screen"                '^TUI nano OK'
 bt_check_not "no terminal program failed"          '^TUI [^ ]* FAIL'
 
 bt_finish

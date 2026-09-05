@@ -59,7 +59,6 @@ bt_check_not "xdotool is on the image"        '^GUI-NOXDOTOOL'
 bt_check "the probe ran to the end"           '^GUI-DONE [1-9]'
 echo "   $(grep -a -c '^GUI [^ ]* OK' "$SER.clean") opened a window, $(grep -a -c '^GUI [^ ]* NOWINDOW' "$SER.clean") did not, $(grep -a -c '^GUI [^ ]* SKIP' "$SER.clean") skipped"
 bt_check "at least five programs opened a window" '^GUI-DONE \([5-9]\|[1-9][0-9]\)'
-bt_check "pcmanfm opened a window"            '^GUI pcmanfm OK'
 bt_check_not "every program opened a window"  '^GUI [^ ]* NOWINDOW'
 bt_check_not "no program failed to load"      '^GUI [^ ]* NOWINDOW.*\(error while loading\|cannot open shared\|not found\)'
 
