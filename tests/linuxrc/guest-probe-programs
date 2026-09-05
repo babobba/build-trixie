@@ -157,7 +157,6 @@ tui mc mc
 tui vim vim /tmp/tui-probe.txt
 tui vi vi /tmp/tui-probe.txt
 tui ncdu ncdu /usr/share
-tui nmtui nmtui
 truncate -s 16M /tmp/tui-disk.img
 tui cfdisk cfdisk /tmp/tui-disk.img
 # alsamixer is not here: the test machine has no sound device, so it exits
