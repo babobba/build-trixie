@@ -24,7 +24,9 @@ CLI_TIMEOUT=${CLI_TIMEOUT:-400}
 GUI_TIMEOUT=${GUI_TIMEOUT:-2700}
 CODES="${CODES:-login=root disable-services=cups nobluetooth}"
 . "$(dirname "$0")/boot-lib.sh"
-CONFIG=${CONFIG:-$REPO/configs-trixie/default-systemd.conf}
+# the branch's default config: the systemd one where it exists, else default.conf
+[ -f "$REPO/configs-trixie/default-systemd.conf" ] && _dc=default-systemd.conf || _dc=default.conf
+CONFIG=${CONFIG:-$REPO/configs-trixie/$_dc}
 PKGS=$(bt_config_packages "$CONFIG" | tr '\n' ' ')
 REPORT='echo "DESKTOP=$(ps -eo comm= | grep -m1 -E "^(openbox|jwm|xfwm4|openbox-session|icewm)")"'
 
