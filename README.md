@@ -9,6 +9,8 @@ See more info about usage and changes/fixes at https://forum.puppylinux.com/view
 scripts, image tests on the built squashfs, boot tests under QEMU by BIOS,
 UEFI and Secure Boot) and `docs/boot-profiling.md` the boot profiler and what
 it found. `tools/build-unattended` runs the build without a keyboard.
+`docs/plan-executable-checks.md` is the plan for checking that every program on
+the image can run.
 
 #### Update 2025-11-29:    
 Added "extra-commands" script, will run inside chroot, based on the idea of @IdfbAn          
