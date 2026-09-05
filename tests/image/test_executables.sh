@@ -83,10 +83,11 @@ if [ -x "$OV/usr/bin/adequate" ]; then
 	for tag in library-not-found undefined-symbol broken-symlink missing-alternative missing-binfmt-interpreter missing-binfmt-detector; do
 		# Documentation is stripped from the image, so links into it dangle
 		# by design; ghostscript's CJK font map points at a package that is
-		# only recommended and is not on the image; a .DirIcon is a ROX-Filer
-		# decoration, and /usr/local/cr-initrd is the initrd source tree,
-		# whose links resolve only once it is the initrd.
-		assert_empty "adequate: no $tag" "$(grep " $tag" "$WORK/adequate.txt" | grep -vE ' /usr/share/(doc|doc-base|man|info|locale|help|ghostscript)/| /usr/local/cr-initrd/|/\.DirIcon ' | head -5 | tr '\n' ' ')"
+		# only recommended and is not on the image; a .DirIcon and the SendTo
+		# links under rox.sourceforge.net are ROX-Filer decorations for a file
+		# manager that is not shipped, and /usr/local/cr-initrd is the initrd
+		# source tree, whose links resolve only once it is the initrd.
+		assert_empty "adequate: no $tag" "$(grep " $tag" "$WORK/adequate.txt" | grep -vE ' /usr/share/(doc|doc-base|man|info|locale|help|ghostscript)/| /usr/local/cr-initrd/|/\.DirIcon |/rox\.sourceforge\.net/' | head -5 | tr '\n' ' ')"
 	done
 else
 	_fail "adequate is on the image" "the build installs it so this check can run offline"
@@ -129,9 +130,10 @@ KEYWORDS="if then else elif fi for while until do done case esac in function ret
 # busybox at run time; probepart is the Puppy helper conv-sfs reaches for on
 # the partition-type path; rox -D is a ROX-Filer window refresh; rxvt is
 # filemnt's prompt for an encrypted image, a path that also needs Puppy's
-# losetup-FULL.
+# losetup-FULL; peasyprint is the sibling tool peasyglue hands its result to
+# when it is installed.
 OPTIONAL="gksu gksudo pkexec xterm-launcher nvidia-detect flatpak snap sfsload-gui live-boot-helper
-rar zip man2html nroff udhcpc probepart rox rxvt"
+rar zip man2html nroff udhcpc probepart rox rxvt peasyprint"
 OPTIONAL=$(echo $OPTIONAL)   # one line, so the " word " lookups below match
 : > "$WORK/script-interp.txt"; : > "$WORK/script-syntax.txt"; : > "$WORK/script-cmds.txt"; NSCR=0
 FUNCS=$(grep -hoE '^[[:space:]]*(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)' "$OV"/usr/local/bin/* "$OV"/usr/local/sbin/* 2>/dev/null | sed -E 's/function[[:space:]]+//; s/[[:space:]]*\(\)//; s/^[[:space:]]*//' | sort -u)

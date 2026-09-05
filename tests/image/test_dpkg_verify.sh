@@ -83,7 +83,10 @@ echo "-- files whose contents changed since their package installed them"
 #                               or 64bit) that the save-file tools format with.
 #                               Whether to keep them is an open question; until
 #                               it is answered the change is a known one.
+#   /etc/menu-methods/jwm       conffile of jwm; jwmconf's postinst copies its
+#                               own over it so the dog menu is generated
 KNOWN_CHANGED="
+/etc/menu-methods/jwm
 /etc/mke2fs.conf
 /etc/skel/.profile
 /etc/rc.local

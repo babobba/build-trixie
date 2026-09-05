@@ -1219,11 +1219,20 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=true
 GXEOF
 	for ashome in /union/root /union/home/*; do
-		[ -d "$ashome/.config/openbox" ] || continue
-		AS="$ashome/.config/openbox/autostart"
-		echo "" >> "$AS"
-		echo "# added by the guiexec= cheatcode" >> "$AS"
-		echo "/usr/local/bin/guiexec-cheat &" >> "$AS"
+		if [ -d "$ashome/.config/openbox" ]; then
+			AS="$ashome/.config/openbox/autostart"
+			echo "" >> "$AS"
+			echo "# added by the guiexec= cheatcode" >> "$AS"
+			echo "/usr/local/bin/guiexec-cheat &" >> "$AS"
+		fi
+		# The dog sessions (jwm's startup-jwm, .xsession for the others) run
+		# every file in ~/Startup through /usr/local/bin/start-up; jwm has no
+		# XDG autostart and no openbox autostart, so this is the only hook
+		# it offers. The lock in guiexec-cheat keeps the three to one run.
+		if [ -d "$ashome/Startup" ]; then
+			printf '#!/bin/sh\nexec /usr/local/bin/guiexec-cheat\n' > "$ashome/Startup/guiexec-cheat"
+			chmod +x "$ashome/Startup/guiexec-cheat"
+		fi
 	done
 fi
 ################################################################################
