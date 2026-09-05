@@ -40,7 +40,13 @@ echo "   image reports ID=$DISTRO_ID, /sbin/init is $INIT"
 debian_common() {
 	echo "-- it is Debian, built from Debian archives only"
 	assert_equal "os-release says debian" "debian" "$DISTRO_ID"
-	NDEV=$(awk '/^Package:/{p=$2} /^Version:/{if ($2 ~ /devuan/) print p}' "$STATUS" | wc -l)
+	# slim is the one allowed Devuan build: Debian dropped it, and the
+	# DebianDog repository carries Devuan's package for the configs that
+	# still want that display manager (ddog).
+	KNOWN_DEVUAN=" slim "
+	DEV=$(awk '/^Package:/{p=$2} /^Version:/{if ($2 ~ /devuan/) print p}' "$STATUS")
+	for p in $DEV; do case "$KNOWN_DEVUAN" in *" $p "*) echo "   $p is Devuan's build, by design" ;; esac; done
+	NDEV=$(for p in $DEV; do case "$KNOWN_DEVUAN" in *" $p "*) ;; *) echo "$p" ;; esac; done | wc -l)
 	assert_equal "no Devuan-versioned packages" "0" "$(echo $NDEV)"
 	assert_no_file "no 99devuan pin" "$ROOT/etc/apt/preferences.d/99devuan"
 	SRC="$ROOT/etc/apt/sources.list"

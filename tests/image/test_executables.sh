@@ -203,7 +203,7 @@ for d in "$OV"/usr/share/applications/*.desktop "$OV"/usr/local/share/applicatio
 	# TryExec names a program whose absence hides the entry (vim.desktop
 	# from vim-common on an image with only vim-tiny): that is the spec
 	# working, not a broken entry, so such an entry is left alone
-	if t=$(sed -n 's/^TryExec=//p' "$f" | head -1) && [ -n "$t" ]; then
+	if t=$(sed -n 's/^TryExec=//p' "$d" | head -1) && [ -n "$t" ]; then
 		ch sh -c "command -v -- '$t' >/dev/null 2>&1" || continue
 	fi
 	for key in TryExec Exec; do

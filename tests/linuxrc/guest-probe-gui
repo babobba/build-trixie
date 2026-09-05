@@ -44,7 +44,7 @@ ARGS="gsu gsu-root gsu-timeout gsu-notimeout filemnt loadmodule redeb ddliveapp 
 # dialog from the second session on), a device or state this guest lacks
 # (alsamixergui without a sound card, move-in-crypt without an encrypted
 # save file).
-NOWIN="parcellite qlipper firewallstatus firewallstatusrestart keysh alsamixergui move-in-crypt"
+NOWIN="parcellite qlipper xfce4-clipman rshift-gui-lite firewallstatus firewallstatusrestart keysh alsamixergui move-in-crypt"
 
 # -- the list ------------------------------------------------------------
 # A package in a squashfs module (Firefox) brings its dpkg file list but
