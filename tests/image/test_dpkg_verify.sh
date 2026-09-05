@@ -112,6 +112,18 @@ CHANGED=$(awk '$1!="missing"{print $NF}' "$WORK/verify" | sort -u)
 #  - a file of a hand-built package, one whose Maintainer field carries no
 #    address (fredx181, root@wheezy, rcrsn51 - the DebianDog packages): their
 #    md5sums are what did not keep up with their files, not the image.
+#  - a package the DebianDog repository builds under Debian's own name and
+#    maintainer, at a version of its own (thunar 1:4.20.2-2 over Debian's
+#    4.20.2-1): a rebuild whose md5sums record did not keep up either. The
+#    repository's index says which versions are its; it is fetched once per
+#    run, and without a network this rule simply does not apply.
+DOG_INDEX="$WORK/dog-Packages"
+DOG_URL=$(sed -n 's/^export REPOS64=.*\(https:[^ ]*\) .*/\1Packages/p' "$REPO/build-trixie" | head -1)
+[ -n "$DOG_URL" ] && curl -sSL --max-time 30 -o "$DOG_INDEX" "$DOG_URL" 2>/dev/null || : > "$DOG_INDEX"
+dog_build() {  # PACKAGE -> 0 when the installed version is one the DebianDog index lists
+	v=$(awk -v p="$1" 'BEGIN{RS=""} $1=="Package:" && $2==p { if (match($0, /\nVersion: [^\n]*/)) print substr($0, RSTART+10, RLENGTH-10); exit }' "$ROOT/var/lib/dpkg/status")
+	[ -n "$v" ] && awk -v p="$1" -v v="$v" 'BEGIN{RS=""; f=1} $1=="Package:" && $2==p && index($0, "\nVersion: " v "\n") { f=0; exit } END{exit f}' "$DOG_INDEX" 2>/dev/null
+}
 DIVERTED=$(awk 'NR % 3 == 1' "$ROOT/var/lib/dpkg/diversions" 2>/dev/null)
 owner_of() {   # FILE -> package name, from the .list files
 	grep -lx -- "$1" "$ROOT"/var/lib/dpkg/info/*.list 2>/dev/null | head -1 | sed 's|.*/||; s/\.list$//; s/:amd64$//'
@@ -137,6 +149,7 @@ for f in $CHANGED; do
 	[ -n "$by" ] && { echo "   $f edited by $(basename "$by")"; continue; }
 	pkg=$(owner_of "$f")
 	[ -n "$pkg" ] && handbuilt "$pkg" && { echo "   $f belongs to $pkg, a hand-built package"; continue; }
+	[ -n "$pkg" ] && dog_build "$pkg" && { echo "   $f belongs to $pkg, a DebianDog build"; continue; }
 	UNEXPECTED_CHANGED="$UNEXPECTED_CHANGED $f"
 done
 # The Devuan archive keyrings used to appear here. The dog-boot overlay carried
