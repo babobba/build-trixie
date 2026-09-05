@@ -66,6 +66,7 @@ expect {
     "This config file cannot be used"              { puts stderr "config rejected"; exit 1 }
     "Failed to install the base system"            { set failed 1; exp_continue }
     "Failed unmounting all mount binds"            { set failed 1; exp_continue }
+    -re "\\\[0;31mFAILED"                            { set failed 1; exp_continue }
     eof                                            { }
     timeout                                        { puts stderr "TIMED OUT waiting for build-trixie"; exit 1 }
 }
