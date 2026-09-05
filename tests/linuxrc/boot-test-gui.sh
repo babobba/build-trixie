@@ -39,7 +39,14 @@ bt_extra_setup() {
 }
 
 # Screenshot each failure as it is reported, while the guest still shows it.
+# And give up when the desktop has had fifteen minutes since the cliexec
+# stage without a single probe line: the hook never ran, and waiting out
+# the whole budget teaches nothing more (jwm cost forty-five minutes here).
 bt_poll() {
+	if [ -n "$cli" ] && [ $((now - cli)) -gt 900 ] && ! grep -aq '^GUI' "$SER" 2>/dev/null; then
+		echo "   no probe line 900s after the cliexec stage - the guiexec hook did not run; giving up"
+		kill $QPID 2>/dev/null
+	fi
 	grep -a '^GUI-FAIL ' "$SER" 2>/dev/null | tr -d '\r' | while read -r _ name; do
 		[ -e "$WORK/fail-$name.ppm" ] || [ -e "$WORK/fail-$name.png" ] && continue
 		bt_screendump "$WORK/fail-$name.ppm"
