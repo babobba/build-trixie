@@ -573,6 +573,11 @@ usermod -a -G sudo,cdrom,disk,audio,video,plugdev,fuse,wheel puppy
 
 # make sure that the dialog for keyboard-configuration shows up
 echo 'debconf debconf/frontend select Dialog' | debconf-set-selections
+# firmware-ipw2x00 asks to accept Intel's licence and its preinst exits 2
+# when the question cannot be put - which is what the lxqt-full build ran
+# into, unattended, with the frontend noninteractive at that moment. Every
+# config installs it; accepting up front is what an interactive build does.
+echo 'firmware-ipw2x00 firmware-ipw2x00/license/accepted boolean true' | debconf-set-selections
 apt-get install whiptail --yes
 
 # configure keyboard first
