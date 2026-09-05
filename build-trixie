@@ -907,15 +907,45 @@ find ../rootcopy -mindepth 1 ! -name ReadMe -exec cp -af "{}" chroot/ \; 2> /dev
 
 export nmu=""  # no-merged-usr not supported anymore post-bookworm
 
-# pfind ships /usr/local/bin/defaultfilemanager as a link to thunar, and its
-# result windows open folders through it; on a config with another file
-# manager the link dangles and nothing opens. Point it at the one installed.
-DFM=chroot/usr/local/bin/defaultfilemanager
-if [ -L $DFM ] && ! chroot chroot test -e /usr/local/bin/defaultfilemanager; then
-for fm in pcmanfm pcmanfm-qt thunar nautilus caja nemo; do
-chroot chroot test -x /usr/bin/$fm && { ln -sfn /usr/bin/$fm $DFM; echo "defaultfilemanager -> /usr/bin/$fm"; break; }
+# The dog packages ship "default application" links in /usr/local/bin -
+# pfind's defaultfilemanager to thunar, the default_* set to Thunar and
+# gpicview - and their tools open files through them; on a config with other
+# applications the links dangle and nothing opens. Point each at the first
+# candidate installed; a link with no candidate at all is removed rather than
+# left dangling, and the icon link is pointed at an icon that exists.
+relink() {   # LINK CANDIDATE...
+   l=chroot/usr/local/bin/$1; shift
+   [ -L $l ] || return 0
+   chroot chroot test -e /usr/local/bin/$(basename $l) && return 0
+   for c; do
+      chroot chroot test -e $c && { ln -sfn $c $l; echo "$(basename $l) -> $c"; return 0; }
+   done
+   echo "$(basename $l): no candidate installed, link removed"; rm -f $l
+}
+relink defaultfilemanager /usr/bin/pcmanfm /usr/bin/pcmanfm-qt /usr/bin/thunar /usr/bin/nautilus /usr/bin/caja /usr/bin/nemo
+relink default_file-browser /usr/bin/pcmanfm /usr/bin/pcmanfm-qt /usr/bin/Thunar /usr/bin/nautilus /usr/bin/caja /usr/bin/nemo /usr/bin/rox
+relink default_image-viewer /usr/bin/viewnior /usr/bin/gpicview /usr/bin/feh /usr/bin/mirage /usr/bin/ristretto /usr/bin/eog /usr/bin/lximage-qt
+relink default_virtual-terminal.icon /usr/share/pixmaps/console48.png /usr/share/pixmaps/xterm-color_48x48.xpm /usr/share/pixmaps/xterm_48x48.xpm /usr/share/pixmaps/debian-logo.png
+relink defaultimageviewer default_image-viewer
+
+# A hand-built package (pburn) ships 32-bit programs; on this image they
+# cannot start at all and would only ever fail. Where busybox has an applet
+# of the name the link does the job, otherwise the file goes.
+for f in chroot/usr/bin/* chroot/usr/sbin/*; do
+   [ -f "$f" ] && [ ! -L "$f" ] || continue
+   [ "$(head -c5 "$f" | tr -d '\0' | cut -c2-4)" = ELF ] || continue
+   [ "$(head -c5 "$f" | tail -c1 | od -An -tu1 | tr -d ' ')" = 2 ] && continue
+   n=$(basename "$f")
+   if chroot chroot busybox --list 2>/dev/null | grep -qx "$n"; then
+      ln -sf /usr/bin/busybox "$f"; echo "$n: 32-bit binary replaced by the busybox applet"
+   else
+      rm -f "$f"; echo "$n: 32-bit binary removed, it could not run here"
+   fi
 done
-fi
+
+# A stray top-level /share (a hand-built package's doc) has no place on the
+# image; what is under it is documentation, which the build strips anyway.
+[ -d chroot/share ] && [ -z "$(ls -A chroot/share | grep -vx doc)" ] && rm -rf chroot/share
 
 # systemd's ConditionNeedsUpdate: ldconfig.service and systemd-update-done
 # run at boot whenever /etc/.updated is older than /usr, and on a live system

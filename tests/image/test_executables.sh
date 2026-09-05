@@ -31,7 +31,7 @@ mount_image "$@"
 grep -q overlay /proc/filesystems || skip "the host kernel has no overlayfs"
 
 # ------------------------------------------------- the booted view, in a chroot
-OVB=/tmp/image-ov-$(basename "$0" .sh)
+OVB=${OVB:-/tmp/image-ov-$(basename "$0" .sh)}
 OV=$OVB/root
 # The overlay's own mounts are taken down first; the image mount the library
 # made comes last and only at exit - taking it down at the start, as a first
@@ -114,8 +114,20 @@ for d in $(sed 's|/[^/]*$||' "$WORK/elf.list" | sort -u); do
 	{ echo /bin/true; grep "^$d/[^/]*$" "$WORK/elf.list"; } | xargs -n 200 chroot "$OV" env LD_LIBRARY_PATH="$LP" /usr/bin/ldd 2>/dev/null \
 		| awk '/^\/.*:$/ { f=$1 } / => not found/ || /not found$/ { print f, $1 }' >> "$WORK/ldd-missing.txt"
 done
+# libcaca's OpenGL output plugin is dlopen'd on demand and links libGLU and
+# libglut, which the package does not depend on; nothing on the image asks
+# caca for an OpenGL window.
+grep -v '/caca/libgl_plugin\.so' "$WORK/ldd-missing.txt" > "$WORK/ldd-missing.tmp"; mv "$WORK/ldd-missing.tmp" "$WORK/ldd-missing.txt"
 sort -u -o "$WORK/ldd-missing.txt" "$WORK/ldd-missing.txt"
 echo "   $NELF ELF files checked"
+# An ELF program of another architecture (a 32-bit binary in a hand-built
+# package) fails with "No such file or directory" from the kernel, which
+# ldd does not report. The class byte says so up front: 2 is 64-bit.
+: > "$WORK/elf-foreign.txt"
+grep -E '^/usr/(bin|sbin|local/bin|local/sbin)/' "$WORK/elf.list" | while read -r f; do
+	[ "$(head -c5 "$OV$f" 2>/dev/null | tail -c1 | od -An -tu1 | tr -d ' ')" = 2 ] || echo "$f" >> "$WORK/elf-foreign.txt"
+done
+assert_empty "no program is built for another architecture" "$(head -8 "$WORK/elf-foreign.txt" | tr '\n' ' ')"
 [ "$NELF" -gt 500 ] && _pass "the scan found the image's programs" || _fail "the scan found the image's programs" "only $NELF ELF files - is the tree what it should be?"
 assert_empty "no ELF file is missing a library" "$(head -8 "$WORK/ldd-missing.txt" | tr '\n' ' ')"
 
@@ -136,7 +148,7 @@ OPTIONAL="gksu gksudo pkexec xterm-launcher nvidia-detect flatpak snap sfsload-g
 rar zip man2html nroff udhcpc probepart rox rxvt peasyprint"
 OPTIONAL=$(echo $OPTIONAL)   # one line, so the " word " lookups below match
 : > "$WORK/script-interp.txt"; : > "$WORK/script-syntax.txt"; : > "$WORK/script-cmds.txt"; NSCR=0
-FUNCS=$(grep -hoE '^[[:space:]]*(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)' "$OV"/usr/local/bin/* "$OV"/usr/local/sbin/* 2>/dev/null | sed -E 's/function[[:space:]]+//; s/[[:space:]]*\(\)//; s/^[[:space:]]*//' | sort -u)
+FUNCS=$(grep -hoE '^[[:space:]]*(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)|^[[:space:]]*function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$OV"/usr/local/bin/* "$OV"/usr/local/sbin/* 2>/dev/null | sed -E 's/function[[:space:]]+//; s/[[:space:]]*\(\)//; s/^[[:space:]]*//' | sort -u)
 for f in "$OV"/usr/local/bin/* "$OV"/usr/local/sbin/*; do
 	[ -f "$f" ] || continue
 	head -c2 "$f" 2>/dev/null | grep -q '^#!' || continue
@@ -150,13 +162,18 @@ for f in "$OV"/usr/local/bin/* "$OV"/usr/local/sbin/*; do
 			# heredoc bodies are data, and the pattern half of a case arm
 			# ("upgrade|dist-upgrade)") is not a command
 			awk -f "$TESTDIR/cmdwords.awk" "$f" \
+			  | sed -E 's/&[a-z]+;//g' \
 			  | tr ';|&`' '\n\n\n\n' | sed -E 's/\$\(/\n/g; s/^[[:space:]]*(if|then|else|elif|while|until|do|time|!|\{|\()[[:space:]]+/\n/' \
 			  | awk '{ w=$1; if (w ~ /^[a-z][a-z0-9_.+-]+$/ && length(w) > 1) print w }' | sort -u \
 			  | while read -r w; do
 				echo " $KEYWORDS " | grep -q " $w " && continue
 				echo "$FUNCS" | grep -qx "$w" && continue
 				echo " $OPTIONAL " | grep -q " $w " && continue
-				ch sh -c "command -v -- '$w' >/dev/null 2>&1" || echo "$rel: $w" >> "$WORK/script-cmds.txt"
+				ch sh -c "command -v -- '$w' >/dev/null 2>&1" && continue
+				# a script that asks which/command -v/type for it first has
+				# made it optional itself
+				grep -qE "(which|command -v|type)[[:space:]]+(-[a-z]+[[:space:]]+)?$w([[:space:]]|\"|'|\)|$)" "$f" && continue
+				echo "$rel: $w" >> "$WORK/script-cmds.txt"
 			  done ;;
 	esac
 done
@@ -174,8 +191,15 @@ for d in "$OV"/usr/share/applications/*.desktop "$OV"/usr/local/share/applicatio
 	# icon names with an extension; those do not stop a launch, so only what
 	# would - a missing or malformed Exec, Type or Name, or a file it cannot
 	# parse - counts.
-	ch desktop-file-validate "$rel" 2>&1 | grep 'error' | grep -qE 'key "(Exec|TryExec|Type|Name)"|required key|does not exist|parse|not a valid' \
+	# an apostrophe in an Exec value is a spec violation every launcher copes with
+	ch desktop-file-validate "$rel" 2>&1 | grep 'error' | grep -v "reserved character "+Q+Q+Q+" outside" | grep -qE 'key "(Exec|TryExec|Type|Name)"|required key|does not exist|parse|not a valid' \
 		&& echo "$rel" >> "$WORK/desktop-bad.txt"
+	# TryExec names a program whose absence hides the entry (vim.desktop
+	# from vim-common on an image with only vim-tiny): that is the spec
+	# working, not a broken entry, so such an entry is left alone
+	if t=$(sed -n 's/^TryExec=//p' "$f" | head -1) && [ -n "$t" ]; then
+		ch sh -c "command -v -- '$t' >/dev/null 2>&1" || continue
+	fi
 	for key in TryExec Exec; do
 		x=$(sed -n "s/^$key=//p" "$d" | head -1 | sed -E 's/^(env[[:space:]]+([A-Za-z_]+=[^[:space:]]*[[:space:]]+)*)//' | awk '{print $1}' | tr -d '"')
 		[ -n "$x" ] || continue

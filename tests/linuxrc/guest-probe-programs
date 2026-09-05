@@ -4,7 +4,7 @@
 # put in /usr/bin and /usr/sbin is started once, and the result goes to
 # stdout (the harness points that at the serial line) as one line each:
 #
-#     PROBE name OK|FAIL|TIMEOUT|SKIP rc=N [note]
+#     PROBE name OK|FAIL|RUNNING|SKIP rc=N [note]
 #     TUI name OK|FAIL|SKIP [note]
 #     PKG-MISSING name
 #     PROBED N
@@ -62,10 +62,15 @@ BAD2='\.so[.0-9]*: cannot open'
 # A package in a squashfs module (Firefox) brings its dpkg file list but
 # only a statusnew entry, so dpkg -L does not know it; its own list file
 # says what it ships.
+# A config may also name a virtual package (gnome-mplayer, provided by the
+# repackaged gnome-mplayer-1.0.6); the provider's list is the one wanted.
 pkg_files() {   # PACKAGE
 	dpkg -L "$1" 2>/dev/null && return 0
-	cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null | grep -q . \
-		&& cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null
+	if cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null | grep -q .; then
+		cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null; return 0
+	fi
+	prov=$(awk -v p="$1" 'BEGIN{RS=""} /\nProvides: / && $0 ~ ("Provides:[^\n]*(^|[ ,])" p "([ ,(]|$)") { match($0, /Package: [^\n]*/); print substr($0, RSTART+9, RLENGTH-9); exit }' /var/lib/dpkg/status)
+	[ -n "$prov" ] && dpkg -L "$prov" 2>/dev/null
 }
 
 : > /tmp/probe-list
@@ -96,7 +101,10 @@ for f in $(sort -u /tmp/probe-list); do
 		[ $rc2 -eq 0 ] && { rc=$rc2; out=$out2; }
 	fi
 	verdict=OK; note=""
-	if [ $rc -eq 124 ]; then verdict=TIMEOUT
+	# still going after ten seconds: it started, which is the question; a
+	# program that waits for events (hotplug2stdout) or shows a clock
+	# (vcstime) is reported so, not failed
+	if [ $rc -eq 124 ]; then verdict=RUNNING
 	elif [ $rc -eq 126 ] || [ $rc -eq 127 ]; then verdict=FAIL; note=cannot-exec
 	# 129..159 is death by a signal; 255 is exit(-1), which Xdialog and the
 	# gtkdialog scripts use for "no display"
