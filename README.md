@@ -10,7 +10,9 @@ scripts, image tests on the built squashfs, boot tests under QEMU by BIOS,
 UEFI and Secure Boot) and `docs/boot-profiling.md` the boot profiler and what
 it found. `tools/build-unattended` runs the build without a keyboard.
 `docs/plan-executable-checks.md` is the plan for checking that every program on
-the image can run.
+the image can run, now implemented: `tests/image/test_executables.sh` and
+`tests/linuxrc/test_initrd_applets.sh` read the built image and initrd, and
+`boot-test-programs.sh` and `boot-test-gui.sh` start the programs in a guest.
 
 #### Update 2025-11-29:    
 Added "extra-commands" script, will run inside chroot, based on the idea of @IdfbAn          

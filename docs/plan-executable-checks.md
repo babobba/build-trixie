@@ -1,5 +1,28 @@
 # Plan: automated checks that every program on the image can run
 
+**Status: implemented.** All four steps are in the tree; `docs/testing.md`
+describes how to run them. What they found on the first runs, all fixed:
+
+- e2fsprogs, util-linux-extra (hwclock, in trixie), rfkill and bc were not
+  on the image at all: the save-file creator, peasyclock and peasywifi
+  called programs that did not exist. Added to every config's BASE_INSTALL.
+- The initrd carried a 32-bit `askpass` asking for a loader it did not
+  have (unused; mkinitrd now drops it), and `xfs` and `f2fs` were in
+  `initrd-src/modlist` but never copied in, so mkinitrd silently dropped
+  them from the built list (now copied).
+- `defaultfilemanager` pointed at a file manager that is not installed
+  (pfind's default); the build now points it at the one that is.
+- `iputils-ping` was missing, so scripts that ping had nothing to call.
+
+The sections below are the plan as written before the work; the
+implementation follows it, with these departures: the guest program test
+does not start the `/usr/local/bin` scripts (they act on their arguments
+rather than parse them, and are covered statically instead), the GUI
+programs list comes from the config's `.desktop` files plus the yad and
+gtkdialog tools, and windows are detected by comparing xdotool's window
+list before and after rather than by process id, since Firefox and pcmanfm
+hand off to another process first.
+
 ## Goal
 
 Two questions, answered automatically on every build:

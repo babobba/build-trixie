@@ -6,7 +6,8 @@
 # Each test rebuilds the initrd from initrd-src before booting, so this checks
 # the working tree's scripts rather than whatever the last full build packed.
 # A test that is not on this branch is skipped, so the same runner serves the
-# sysvinit and systemd branches. Roughly three minutes per boot under TCG.
+# sysvinit and systemd branches. Roughly three minutes per boot under TCG,
+# ten for the programs test.
 cd "$(dirname "$0")/../.." || exit 1
 T=tests/linuxrc
 pass=0; fail=0; skip=0
@@ -29,6 +30,9 @@ run image          $T/boot-test-image.sh
 run modules        $T/boot-test-modules.sh
 run uefi           $T/boot-test-uefi.sh
 run uefi-secure    $T/boot-test-uefi.sh     NAME=uefi-secure FIRMWARE=uefi-secure
+run programs       $T/boot-test-programs.sh
+# boot-test-gui.sh is deliberately not here: it takes most of an hour under
+# emulation and is sensitive to timing. Run it by hand before a release.
 
 echo
 echo "boot tests: $pass passed, $fail failed, $skip not on this branch"
