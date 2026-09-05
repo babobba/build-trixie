@@ -192,7 +192,7 @@ for d in "$OV"/usr/share/applications/*.desktop "$OV"/usr/local/share/applicatio
 	# would - a missing or malformed Exec, Type or Name, or a file it cannot
 	# parse - counts.
 	# an apostrophe or ~ in an Exec value is a spec violation every launcher copes with
-	ch desktop-file-validate "$rel" 2>&1 | grep 'error' | grep -v "reserved character "+Q+Q+Q+" outside" | grep -qE 'key "(Exec|TryExec|Type|Name)"|required key|does not exist|parse|not a valid' \
+	ch desktop-file-validate "$rel" 2>&1 | grep 'error' | grep -v 'reserved character' | grep -qE 'key "(Exec|TryExec|Type|Name)"|required key|does not exist|parse|not a valid' \
 		&& echo "$rel" >> "$WORK/desktop-bad.txt"
 	# TryExec names a program whose absence hides the entry (vim.desktop
 	# from vim-common on an image with only vim-tiny): that is the spec
