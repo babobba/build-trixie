@@ -191,7 +191,7 @@ for d in "$OV"/usr/share/applications/*.desktop "$OV"/usr/local/share/applicatio
 	# icon names with an extension; those do not stop a launch, so only what
 	# would - a missing or malformed Exec, Type or Name, or a file it cannot
 	# parse - counts.
-	# an apostrophe in an Exec value is a spec violation every launcher copes with
+	# an apostrophe or ~ in an Exec value is a spec violation every launcher copes with
 	ch desktop-file-validate "$rel" 2>&1 | grep 'error' | grep -v "reserved character "+Q+Q+Q+" outside" | grep -qE 'key "(Exec|TryExec|Type|Name)"|required key|does not exist|parse|not a valid' \
 		&& echo "$rel" >> "$WORK/desktop-bad.txt"
 	# TryExec names a program whose absence hides the entry (vim.desktop
