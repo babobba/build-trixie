@@ -148,6 +148,38 @@ repack_initrd() {
 	bt_initrd_pack "$IRD" "$IRD_FMT" > "$WORK/iso/live/initrd1.xz" || bt_fail "could not repack initrd1.xz"
 }
 
+# The packages a build config installs, as one list. The program tests draw
+# their subjects from this so that the list follows the config rather than a
+# hand-kept copy of it; a package that is named here and missing from the
+# medium is then a finding, not a gap in the test.
+# MODULE_PACKAGES are installed with the rest and then moved out of the base
+# into a squashfs module on the medium, so they are on the list only when
+# the test loads the modules (BASE_ONLY=0).
+bt_config_packages() {   # CONFIG
+	[ -f "$1" ] || bt_fail "no config at $1"
+	( set +u; . "$1" >/dev/null 2>&1
+	  echo $BASE_INSTALL $BASE_DOG_APPS_INSTALL $BASE_APPS_INSTALL $DESK_APPS_INSTALL \
+	       $EXTRA_DOG_APPS_INSTALL $FIRMWARE $MODULE_PACKAGES | tr ' ' '\n' | grep . | sort -u \
+	    | if [ "$BASE_ONLY" = 1 ] && [ -n "$MODULE_PACKAGES" ]; then
+	          grep -vxF "$(echo $MODULE_PACKAGES | tr ' ' '\n')"; else cat; fi )
+}
+
+# Ask the QEMU monitor for a screenshot (PPM, converted to PNG when a
+# converter is at hand). For a GUI failure the picture says more than the
+# serial log.
+bt_screendump() {   # FILE.ppm
+	python3 - "$MON" "$1" <<'PY' 2>/dev/null
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(5)
+s.connect(sys.argv[1]); time.sleep(0.3); s.recv(4096)
+s.sendall(("screendump %s\n" % sys.argv[2]).encode()); time.sleep(1.5)
+try: s.recv(4096)
+except Exception: pass
+PY
+	if command -v pnmtopng >/dev/null 2>&1; then pnmtopng "$1" > "${1%.ppm}.png" 2>/dev/null && rm -f "$1"
+	elif command -v convert >/dev/null 2>&1; then convert "$1" "${1%.ppm}.png" 2>/dev/null && rm -f "$1"; fi
+}
+
 bt_build() {
 	[ -d "$ISODATA/live" ] || bt_fail "no isodata at $ISODATA - run build-trixie first"
 	echo "== building test ISO ($NAME)"
@@ -156,9 +188,17 @@ bt_build() {
 	repack_initrd
 	mkdir -p "$WORK/iso/live/rootcopy/usr/local/bin"
 
+	# The report's lines each go out through a fresh open of the serial
+	# device rather than one descriptor held for the run. systemd starts a
+	# getty on ttyS0 (console= puts it there) some seconds into the boot,
+	# and agetty hangs the line up as it starts, which revokes every
+	# descriptor already open on it: a report that had not finished by then
+	# lost the rest of its output, and with it the CLI-END marker. Short
+	# reports won that race; the program probes, which run for minutes,
+	# cannot.
 	{
 		echo '#!/bin/sh'
-		echo 'exec > /dev/ttyS0 2>&1'
+		echo 'report() {'
 		echo 'echo "===CLI-MARKER==="'
 		# printf, not echo: dash's echo interprets backslash escapes, so a
 		# sed or awk expression in REPORT arrives with its backslashes eaten
@@ -166,6 +206,8 @@ bt_build() {
 		# like a broken cheatcode and was a broken test.
 		printf '%s\n' "$REPORT"
 		echo 'echo "===CLI-END==="'
+		echo '}'
+		echo 'report 2>&1 | while IFS= read -r l; do echo "$l" > /dev/ttyS0; done'
 	} > "$WORK/iso/live/rootcopy/usr/local/bin/rcli"
 	printf '#!/bin/sh\necho "===GUI-MARKER===" > /dev/ttyS0\n' \
 		> "$WORK/iso/live/rootcopy/usr/local/bin/rgui"
@@ -278,8 +320,14 @@ bt_boot() {
 	while :; do
 		now=$(( $(date +%s) - start ))
 		[ -z "$cli" ] && grep -q "CLI-END" "$SER" 2>/dev/null && { cli=$now; echo "   cliexec stage at ${cli}s"; }
-		[ -z "$gui" ] && grep -q "GUI-MARKER" "$SER" 2>/dev/null && { gui=$now; echo "   guiexec stage at ${gui}s"; break; }
+		[ -z "$gui" ] && grep -q "GUI-MARKER" "$SER" 2>/dev/null && { gui=$now; echo "   guiexec stage at ${gui}s"; }
+		# both stages, in whichever order: a report that runs for minutes
+		# at the cliexec stage is still going when the desktop comes up
+		[ -n "$cli" ] && [ -n "$gui" ] && break
 		kill -0 $QPID 2>/dev/null || { echo "   qemu exited early"; break; }
+		# a test that must act while the guest runs - a screenshot the
+		# moment a window fails to appear - defines bt_poll
+		command -v bt_poll >/dev/null 2>&1 && bt_poll
 		[ -z "$cli" ] && [ "$now" -ge "$CLI_TIMEOUT" ] && break
 		[ "$now" -ge "$GUI_TIMEOUT" ] && break
 		sleep 3

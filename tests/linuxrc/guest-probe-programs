@@ -1,0 +1,157 @@
+#!/bin/sh
+# Runs inside the booted guest at the cliexec stage, as root, with PKGS set
+# to the packages the build config installs.  Every program those packages
+# put in /usr/bin and /usr/sbin is started once, and the result goes to
+# stdout (the harness points that at the serial line) as one line each:
+#
+#     PROBE name OK|FAIL|TIMEOUT|SKIP rc=N [note]
+#     TUI name OK|FAIL|SKIP [note]
+#     PKG-MISSING name
+#     PROBED N
+#
+# The question is only whether the program can start: its loader finds the
+# libraries, its interpreter exists, it does not die of a signal.  What it
+# prints for --version is its own business and the exit status is recorded,
+# not judged - usage-and-exit-1 is normal for a program that has no
+# --version.  The static checks in tests/image cover the libraries a file
+# says it needs; this covers what happens when it actually runs, which is
+# where dlopen'd plugins, missing interpreters and wrong-architecture
+# binaries show up.
+#
+# /usr/local/bin is left out on purpose: those are the dog scripts, which
+# act on their arguments rather than parse them, and a remaster started by a
+# probe would make the test both slow and meaningless.  They are checked
+# statically (interpreter, syntax, every command they call) by
+# tests/image/test_executables.sh, and the GUI ones by boot-test-gui.sh.
+
+# Programs that act without arguments, or on --version in old versions, and
+# must never be started here. Each name's reason:
+#   shutdown poweroff halt reboot telinit init  - would end the test
+#   kexec                                        - loads a kernel
+#   mkswap wipefs shred dd                       - write to whatever they get
+#   fdisk sfdisk cfdisk parted partprobe         - partition tools
+#   xinit startx Xorg X                          - start a second server
+#   agetty getty login sulogin                   - take over the console
+#   mount.fuse ntfs-3g ntfs-3g.probe             - want a device argument and hang on none
+#   pm-hibernate pm-suspend pm-suspend-hybrid    - suspend the machine whatever the arguments
+#   s2ram s2disk s2both
+#   alsabat-test                                 - plays and records a test signal
+#   tgz                                          - mtools: writes a tar archive to a floppy
+DENY="shutdown poweroff halt reboot telinit init kexec mkswap wipefs shred dd
+fdisk sfdisk cfdisk parted partprobe xinit startx Xorg X agetty getty login
+sulogin mount.fuse ntfs-3g ntfs-3g.probe pm-hibernate pm-suspend pm-suspend-hybrid
+s2ram s2disk s2both alsabat-test tgz"
+
+# Programs Debian ships without the interpreter they need, which it lists
+# as a suggestion: xkeystone is a nickle script. Reported, not counted.
+KNOWN_NO_INTERP="xkeystone"
+deny() {
+	case " $(echo $DENY) " in *" $1 "*) return 0 ;; esac
+	case $1 in mkfs|mkfs.*|fsck|fsck.*|mke2fs|mkdosfs|mkntfs|e2fsck|resize2fs|tune2fs|badblocks) return 0 ;; esac
+	return 1
+}
+
+# What a failure to start looks like on stderr.
+BAD='error while loading shared libraries|cannot open shared object|Segmentation fault|symbol lookup error|Illegal instruction|Bus error|bad interpreter|: not found$|version .GLIBC[^ ]* not found'
+# "No such file or directory" is a start failure only when it is a library
+# that cannot be opened; a program complaining that the file "--version"
+# does not exist is merely literal-minded, and a missing interpreter shows
+# as exit 127 ("not found" or "bad interpreter") anyway.
+BAD2='\.so[.0-9]*: cannot open'
+
+# A package in a squashfs module (Firefox) brings its dpkg file list but
+# only a statusnew entry, so dpkg -L does not know it; its own list file
+# says what it ships.
+pkg_files() {   # PACKAGE
+	dpkg -L "$1" 2>/dev/null && return 0
+	cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null | grep -q . \
+		&& cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null
+}
+
+: > /tmp/probe-list
+for p in $PKGS; do
+	if pkg_files "$p" > /tmp/probe-pkg; then
+		grep -E '^/usr/(bin|sbin)/[^/]+$' /tmp/probe-pkg >> /tmp/probe-list
+	else
+		echo "PKG-MISSING $p"
+	fi
+done
+
+n=0
+for f in $(sort -u /tmp/probe-list); do
+	p=${f##*/}
+	[ -e "$f" ] || { echo "PROBE $p FAIL rc=- shipped-but-absent $f"; continue; }
+	[ -x "$f" ] && [ ! -d "$f" ] || continue
+	deny "$p" && { echo "PROBE $p SKIP rc=- denylist"; continue; }
+	case " $KNOWN_NO_INTERP " in *" $p "*) echo "PROBE $p SKIP rc=- interpreter-is-a-suggests"; continue ;; esac
+	n=$((n + 1))
+	# the name goes out before the program runs, so that a program that
+	# takes the console down with it is still named in the log
+	printf 'PROBE %s ' "$p"
+	out=$(timeout -k 2 10 "$f" --version </dev/null 2>&1 >/dev/null); rc=$?
+	# --help as the second try, even after 127: busybox answers --version
+	# with "applet not found" and 127, and --help with its applet list
+	if [ $rc -ne 0 ] && [ $rc -ne 124 ]; then
+		out2=$(timeout -k 2 10 "$f" --help </dev/null 2>&1 >/dev/null); rc2=$?
+		[ $rc2 -eq 0 ] && { rc=$rc2; out=$out2; }
+	fi
+	verdict=OK; note=""
+	if [ $rc -eq 124 ]; then verdict=TIMEOUT
+	elif [ $rc -eq 126 ] || [ $rc -eq 127 ]; then verdict=FAIL; note=cannot-exec
+	# 129..159 is death by a signal; 255 is exit(-1), which Xdialog and the
+	# gtkdialog scripts use for "no display"
+	elif [ $rc -gt 128 ] && [ $rc -lt 160 ]; then verdict=FAIL; note="signal-$((rc - 128))"
+	fi
+	m=$(printf '%s\n' "$out" | grep -E -m1 "$BAD|$BAD2" | cut -c1-120)
+	[ -n "$m" ] && { verdict=FAIL; note="$note $m"; }
+	# a failure carries the program's first line of stderr, so the log says
+	# why without a second boot
+	[ "$verdict" = FAIL ] && [ -z "$m" ] && note="$note | $(printf '%s\n' "$out" | grep -m1 . | cut -c1-100)"
+	# There is no X at this stage. A GUI program that says so has started
+	# as far as it can here - even the ones GLib ends with SIGTRAP - and
+	# boot-test-gui.sh is where it is run for real.
+	printf '%s\n' "$out" | grep -qiE 'cannot open display|could not open display|no display|DISPLAY' \
+		&& [ "$verdict" = FAIL ] && { verdict=OK; note="nodisplay"; }
+	# The desktop is up by the time the probes run, so a session daemon
+	# (pup-volume-monitor) finds its socket taken by the running instance
+	# and aborts through g_error, which GLib turns into SIGTRAP.
+	printf '%s\n' "$out" | grep -qiE 'already in use|already running|create socket' \
+		&& [ "$verdict" = FAIL ] && { verdict=OK; note="already-running"; }
+	echo "$verdict rc=$rc $note"
+done
+echo "PROBED $n"
+
+# Terminal programs.  Each gets a pseudo-terminal from script(1) and five
+# seconds; a program that is still running when the time is up (exit 124
+# from timeout) and drew escape sequences on its terminal has started.  A
+# terminfo problem shows up as "Error opening terminal" and an exit of 1.
+TERM=linux; export TERM
+: > /tmp/tui-probe.txt
+tui() {   # NAME COMMAND...
+	name=$1; shift
+	command -v "$name" >/dev/null 2>&1 || { echo "TUI $name SKIP absent"; return; }
+	script -qec "timeout -k 2 5 $*" /dev/null > /tmp/tui-cap 2>&1 </dev/null; rc=$?
+	if [ $rc -ne 124 ]; then echo "TUI $name FAIL rc=$rc $(grep -aoE "Error opening terminal|terminals database|$BAD" /tmp/tui-cap | head -1)"
+	elif grep -qaE "Error opening terminal|terminals database|$BAD" /tmp/tui-cap; then
+		echo "TUI $name FAIL $(grep -aoE "Error opening terminal|terminals database|$BAD" /tmp/tui-cap | head -1)"
+	elif ! grep -qa "$(printf '\033')" /tmp/tui-cap; then echo "TUI $name FAIL drew-nothing"
+	else echo "TUI $name OK"
+	fi
+}
+tui nano nano /tmp/tui-probe.txt
+tui less less /etc/hostname
+tui top top
+tui htop htop
+tui dialog dialog --msgbox probe 5 20
+tui whiptail whiptail --msgbox probe 5 20
+tui aptitude aptitude
+tui mc mc
+tui vim vim /tmp/tui-probe.txt
+tui vi vi /tmp/tui-probe.txt
+tui ncdu ncdu /usr/share
+tui nmtui nmtui
+truncate -s 16M /tmp/tui-disk.img
+tui cfdisk cfdisk /tmp/tui-disk.img
+# alsamixer is not here: the test machine has no sound device, so it exits
+# with "cannot open mixer" before drawing anything, which says nothing about
+# the program.

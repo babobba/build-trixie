@@ -1,0 +1,118 @@
+#!/bin/sh
+# Runs inside the booted guest as the guiexec hook: in the X session, once
+# the desktop is up, with PKGS set to the packages the build config
+# installs.  Every program those packages register in a .desktop file, plus
+# the dog tools in /usr/local/bin that are built on yad, gtkdialog, Xdialog
+# or zenity, is started and watched for a window.  One line per program:
+#
+#     GUI name OK Ns          a new window appeared after N seconds
+#     GUI name NOWINDOW note  none within the budget; note says whether the
+#                             process died (and how) or was still running
+#     GUI name SKIP note      not started: no display, name not a program
+#     GUI-FAIL name           printed before the failure's cleanup, so the
+#                             host can take a screenshot while it shows
+#     GUI-DONE N
+#
+# Nothing here judges what the window contains. A program that needs a
+# device or a password opens its complaint in a window, and that counts:
+# the question is whether it gets as far as a window at all, which is what
+# a missing library, a wrong interpreter or a broken GTK install prevents.
+# Windows are counted by comparing xdotool's list before and after, rather
+# than by the process id, because Firefox and pcmanfm hand off to another
+# process before they map anything.
+
+BUDGET=${BUDGET:-60}
+say() { echo "$@" > /dev/ttyS0; }
+
+if [ -z "$DISPLAY" ]; then say "GUI-NODISPLAY"; say "===GUI-MARKER==="; exit 0; fi
+if ! command -v xdotool >/dev/null 2>&1; then say "GUI-NOXDOTOOL"; say "===GUI-MARKER==="; exit 0; fi
+
+# Programs a probe must not start, with the reason:
+#   obshutdown, xlogout, obconf-exit  - end the session
+#   xterm-launcher, rgui, rcli        - the harness itself
+DENY="obshutdown xlogout rgui rcli probe-gui probe-programs guiexec-cheat cliexec-cheat"
+# Wrappers that need an argument and exit at once without one, so a bare
+# start says nothing about them: gsu and its variants run a command as
+# root, filemnt mounts the image it is given, loadmodule loads a named
+# squashfs, redeb takes a .deb or a directory. They open their windows for
+# the argument, and the file manager passes it.
+ARGS="gsu gsu-root gsu-timeout gsu-notimeout filemnt loadmodule redeb"
+
+# -- the list ------------------------------------------------------------
+# A package in a squashfs module (Firefox) brings its dpkg file list but
+# only a statusnew entry, so dpkg -L does not know it; its own list file
+# says what it ships.
+pkg_files() {   # PACKAGE
+	dpkg -L "$1" 2>/dev/null || cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null
+}
+
+: > /tmp/gui-list
+for p in $PKGS; do
+	pkg_files "$p" | grep -E '^/usr/share/applications/[^/]+\.desktop$'
+done | sort -u | while read -r d; do
+	grep -q '^Type=Application' "$d" || continue
+	grep -q '^NoDisplay=true' "$d" && continue
+	grep -q '^Terminal=true' "$d" && continue
+	e=$(sed -n 's/^Exec=//p' "$d" | head -1)
+	# drop an env prefix and the %f-style placeholders; keep the command
+	set -- $e
+	while [ "$1" = env ] || [ "${1#*=}" != "$1" ]; do shift; done
+	cmd=""; for a in "$@"; do case $a in %*) ;; *) cmd="$cmd $a" ;; esac; done
+	echo "${d##*/}|${cmd# }"
+done >> /tmp/gui-list
+for f in /usr/local/bin/*; do
+	[ -f "$f" ] && [ -x "$f" ] || continue
+	grep -qE 'gtkdialog|yad |yad$|Xdialog|zenity' "$f" 2>/dev/null || continue
+	echo "${f##*/}|$f" >> /tmp/gui-list
+done
+
+# -- the probes ----------------------------------------------------------
+n=0
+cd /tmp || exit 1
+: > /tmp/gui-seen
+sort -u /tmp/gui-list | while IFS='|' read -r label cmd; do
+	name=${cmd%% *}; name=${name##*/}
+	# a dog tool has a .desktop entry and is in /usr/local/bin: once is enough
+	grep -qx "$name" /tmp/gui-seen && continue
+	echo "$name" >> /tmp/gui-seen
+	case " $DENY " in *" $name "*) continue ;; esac
+	case " $ARGS " in *" $name "*) say "GUI $name SKIP takes-an-argument"; continue ;; esac
+	command -v "$name" >/dev/null 2>&1 || { say "GUI $name SKIP not-a-program ($label)"; continue; }
+	n=$((n + 1))
+	b=$BUDGET; case $name in firefox*|libreoffice*|chromium*) b=$((BUDGET * 3)) ;; esac
+	xdotool search --onlyvisible --name . 2>/dev/null | sort > /tmp/gui-before
+	sh -c "exec $cmd" > "/tmp/gui-$name.err" 2>&1 </dev/null &
+	pid=$!
+	t=0; new=""; gone=""
+	while [ $t -lt $b ]; do
+		sleep 2; t=$((t + 2))
+		xdotool search --onlyvisible --name . 2>/dev/null | sort > /tmp/gui-after
+		new=$(comm -13 /tmp/gui-before /tmp/gui-after)
+		[ -n "$new" ] && break
+		if [ -z "$gone" ] && ! kill -0 $pid 2>/dev/null; then
+			wait $pid; gone=$?
+			# exit 0 is a program that forked and carried on; anything
+			# else is a program that is not coming back
+			[ $gone -ne 0 ] && break
+		fi
+	done
+	if [ -n "$new" ]; then
+		say "GUI $name OK ${t}s"
+	else
+		note="still-running"
+		[ -n "$gone" ] && note="exited rc=$gone"
+		[ -n "$gone" ] && [ $gone -ge 128 ] && note="signal-$((gone - 128))"
+		err=$(grep -aE -m1 'error while loading|cannot open shared|cannot open display|Gtk-ERROR|Gtk-WARNING.*display|not found|Segmentation|No such file' "/tmp/gui-$name.err" | cut -c1-100)
+		say "GUI $name NOWINDOW $note ${err:+- $err}"
+		say "GUI-FAIL $name"
+		sleep 6      # time for the host to take its picture
+	fi
+	# put things back: close what appeared, end what was started
+	for w in $new; do xdotool windowclose "$w" 2>/dev/null; done
+	kill $pid 2>/dev/null; sleep 1; kill -9 $pid 2>/dev/null
+	pkill -x "$name" 2>/dev/null
+	sleep 1
+	echo $n > /tmp/gui-count
+done
+say "GUI-DONE $(cat /tmp/gui-count 2>/dev/null || echo 0)"
+say "===GUI-MARKER==="
