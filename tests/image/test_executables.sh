@@ -87,7 +87,10 @@ if [ -x "$OV/usr/bin/adequate" ]; then
 		# links under rox.sourceforge.net are ROX-Filer decorations for a file
 		# manager that is not shipped, and /usr/local/cr-initrd is the initrd
 		# source tree, whose links resolve only once it is the initrd.
-		assert_empty "adequate: no $tag" "$(grep " $tag" "$WORK/adequate.txt" | grep -vE ' /usr/share/(doc|doc-base|man|info|locale|help|ghostscript)/| /usr/local/cr-initrd/|/\.DirIcon |/rox\.sourceforge\.net/' | head -5 | tr '\n' ' ')"
+		# libqt5core5t64's qtchooser default.conf points into the qtchooser
+		# package, which is only recommended; it selects a Qt for qmake and
+		# means nothing to a program that runs.
+		assert_empty "adequate: no $tag" "$(grep " $tag" "$WORK/adequate.txt" | grep -vE ' /usr/share/(doc|doc-base|man|info|locale|help|ghostscript)/| /usr/local/cr-initrd/|/\.DirIcon |/rox\.sourceforge\.net/|/qtchooser/' | head -5 | tr '\n' ' ')"
 	done
 else
 	_fail "adequate is on the image" "the build installs it so this check can run offline"
@@ -143,9 +146,10 @@ KEYWORDS="if then else elif fi for while until do done case esac in function ret
 # the partition-type path; rox -D is a ROX-Filer window refresh; rxvt is
 # filemnt's prompt for an encrypted image, a path that also needs Puppy's
 # losetup-FULL; peasyprint is the sibling tool peasyglue hands its result to
-# when it is installed.
+# when it is installed; timedatectl is systemd's, and the two ntp scripts
+# that call it silence the error on a sysvinit image and carry on.
 OPTIONAL="gksu gksudo pkexec xterm-launcher nvidia-detect flatpak snap sfsload-gui live-boot-helper
-rar zip man2html nroff udhcpc probepart rox rxvt peasyprint"
+rar zip man2html nroff udhcpc probepart rox rxvt peasyprint timedatectl"
 OPTIONAL=$(echo $OPTIONAL)   # one line, so the " word " lookups below match
 : > "$WORK/script-interp.txt"; : > "$WORK/script-syntax.txt"; : > "$WORK/script-cmds.txt"; NSCR=0
 FUNCS=$(grep -hoE '^[[:space:]]*(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)|^[[:space:]]*function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$OV"/usr/local/bin/* "$OV"/usr/local/sbin/* 2>/dev/null | sed -E 's/function[[:space:]]+//; s/[[:space:]]*\(\)//; s/^[[:space:]]*//' | sort -u)
@@ -172,7 +176,7 @@ for f in "$OV"/usr/local/bin/* "$OV"/usr/local/sbin/*; do
 				ch sh -c "command -v -- '$w' >/dev/null 2>&1" && continue
 				# a script that asks which/command -v/type for it first has
 				# made it optional itself
-				grep -qE "(which|command -v|type)[[:space:]]+(-[a-z]+[[:space:]]+)?$w([[:space:]]|\"|'|\)|$)" "$f" && continue
+				grep -qE "(which|command -v|type)[[:space:]]+(-[a-z]+[[:space:]]+)?$w([^A-Za-z0-9_.+-]|$)" "$f" && continue
 				echo "$rel: $w" >> "$WORK/script-cmds.txt"
 			  done ;;
 	esac
@@ -228,7 +232,7 @@ assert_empty "every alternative resolves" "$(head -5 "$WORK/alt-bad.txt" | tr '\
 # /usr/local/cr-initrd is upgrade-kernel's initramfs skeleton, busybox links
 # and all; it is assembled elsewhere and is not the live tree.
 DANGLING=$(ch find /usr/bin /usr/sbin /usr/lib /usr/local /usr/share/applications /etc/alternatives -path /usr/local/cr-initrd -prune -o -xtype l -print 2>/dev/null \
-	| while read -r l; do t=$(ch readlink -f "$l" 2>/dev/null); echo "$t" | grep -qE "$STRIPPED" || echo "$l"; done | head -8 | tr '\n' ' ')
+	| while read -r l; do t=$(ch readlink -f "$l" 2>/dev/null); echo "$t" | grep -qE "$STRIPPED" || echo "$l"; done | grep -v '/qtchooser/' | head -8 | tr '\n' ' ')
 assert_empty "no dangling symlink under /usr or /etc/alternatives" "$DANGLING"
 
 if [ "${BREAK:-0}" = 1 ]; then
