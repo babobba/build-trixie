@@ -115,6 +115,9 @@ Knobs, all environment variables read by `boot-lib.sh`:
   modules test boots the base alone, so a module can never hide a broken base)
 - `FIRMWARE=bios|uefi|uefi-secure`, with `OVMF_CODE` and `OVMF_VARS` to point
   at other firmware files
+- `ACCEL=tcg` forces emulation; by default the guest runs under KVM when
+  `/dev/kvm` is usable, which boots it about six times faster, and under
+  TCG otherwise (the test prints which)
 - `CLI_TIMEOUT` (180 s) and `GUI_TIMEOUT` (240 s); the program tests raise
   both, since their guest side runs for minutes
 - `CONFIG` (default `configs-trixie/default-systemd.conf`): the config whose
@@ -139,6 +142,31 @@ starts, revoking any descriptor already open on it, so the report writes
 each line through a fresh open of the device rather than one held for the
 run (a report that ran for minutes lost everything after that point,
 including its end marker).
+
+## Every config, every check: `tools/check-configs`
+
+```
+sudo tools/check-configs                       # every config
+sudo tools/check-configs configs-trixie/jwm.conf configs-trixie/mate.conf
+sudo tools/check-configs --tests-only jwm      # the tests again, no rebuild
+```
+
+Builds each config and runs the image tests, the initrd test, the programs
+boot test and (for configs with an X server) the GUI boot test on what it
+built. Results land under `/tmp/check-configs` (`RESULTS=` to move them):
+`summary.txt`, `report.md` with the commit and each step's time, and per
+config the logs, the FAIL lines in `findings.txt`, and the built isodata,
+kept so that a test-only change can be rerun with `--tests-only` in two
+minutes instead of a rebuild (`KEEP=0` drops it; about 400 MB each).
+
+The run works from a snapshot of the committed tree, not the working copy:
+an edit made while a build runs would otherwise be read by bash half-way
+through, and the results would belong to nothing in particular. Commit,
+then run; `SNAPSHOT=0` uses the working copy. The next config builds while
+the current one's tests run (`PIPELINE=0` for strictly one at a time), and
+`SKIP_GUI=1` leaves the GUI test out. Under emulation a config takes
+twenty to forty minutes; with KVM a few. `docs/config-checks.md` has the
+last full run.
 
 ## Building without a keyboard
 
