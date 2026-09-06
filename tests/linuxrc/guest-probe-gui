@@ -92,9 +92,11 @@ sort -u /tmp/gui-list | while IFS='|' read -r label cmd; do
 	xdotool search --onlyvisible --name . 2>/dev/null | sort > /tmp/gui-before
 	sh -c "exec $cmd" > "/tmp/gui-$name.err" 2>&1 </dev/null &
 	pid=$!
-	t=0; new=""; gone=""
+	# half-second steps: most programs map a window inside two seconds, and
+	# the wait for the last one is what the run's length is made of
+	t=0; tt=0; new=""; gone=""
 	while [ $t -lt $b ]; do
-		sleep 2; t=$((t + 2))
+		sleep 0.5; tt=$((tt + 1)); t=$((tt / 2))
 		xdotool search --onlyvisible --name . 2>/dev/null | sort > /tmp/gui-after
 		new=$(comm -13 /tmp/gui-before /tmp/gui-after)
 		[ -n "$new" ] && break
@@ -106,7 +108,7 @@ sort -u /tmp/gui-list | while IFS='|' read -r label cmd; do
 		fi
 	done
 	if [ -n "$new" ]; then
-		say "GUI $name OK ${t}s"
+		say "GUI $name OK $(( tt / 2 )).$(( tt % 2 * 5 ))s"
 	else
 		note="still-running"
 		[ -n "$gone" ] && note="exited rc=$gone"
@@ -118,9 +120,9 @@ sort -u /tmp/gui-list | while IFS='|' read -r label cmd; do
 	fi
 	# put things back: close what appeared, end what was started
 	for w in $new; do xdotool windowclose "$w" 2>/dev/null; done
-	kill $pid 2>/dev/null; sleep 1; kill -9 $pid 2>/dev/null
+	kill $pid 2>/dev/null; sleep 0.3; kill -9 $pid 2>/dev/null
 	pkill -x "$name" 2>/dev/null
-	sleep 1
+	sleep 0.3
 	echo $n > /tmp/gui-count
 done
 say "GUI-DONE $(cat /tmp/gui-count 2>/dev/null || echo 0)"

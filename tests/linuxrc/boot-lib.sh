@@ -312,8 +312,15 @@ bt_boot() {
 		[ "$FIRMWARE" = uefi-secure ] && FW="-machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on $FW"
 		echo "   firmware: $FIRMWARE ($OVMF_CODE)" ;;
 	esac
+	# KVM when the host offers it - the same guest boots about six times
+	# faster - and emulation otherwise. ACCEL=tcg forces emulation.
+	if [ "${ACCEL:-auto}" != tcg ] && [ -w /dev/kvm ]; then
+		ACCEL_OPTS="-accel kvm -cpu host"; echo "   accel: kvm"
+	else
+		ACCEL_OPTS="-accel tcg,thread=multi,tb-size=1024"; echo "   accel: tcg (no usable /dev/kvm)"
+	fi
 	# shellcheck disable=SC2086
-	qemu-system-x86_64 -accel tcg,thread=multi,tb-size=1024 -m 3072 -smp 4 $FW \
+	qemu-system-x86_64 $ACCEL_OPTS -m 3072 -smp 4 $FW \
 	  -cdrom "$WORK/boot-test.iso" -boot d $DISK -display none -vga std \
 	  -monitor unix:"$MON",server,nowait -serial file:"$SER" -no-reboot \
 	  > "$WORK/qemu.log" 2>&1 &

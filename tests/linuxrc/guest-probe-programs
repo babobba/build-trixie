@@ -59,42 +59,20 @@ BAD='error while loading shared libraries|cannot open shared object|Segmentation
 # as exit 127 ("not found" or "bad interpreter") anyway.
 BAD2='\.so[.0-9]*: cannot open'
 
-# A package in a squashfs module (Firefox) brings its dpkg file list but
-# only a statusnew entry, so dpkg -L does not know it; its own list file
-# says what it ships.
-# A config may also name a virtual package (gnome-mplayer, provided by the
-# repackaged gnome-mplayer-1.0.6); the provider's list is the one wanted.
-pkg_files() {   # PACKAGE
-	dpkg -L "$1" 2>/dev/null && return 0
-	if cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null | grep -q .; then
-		cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null; return 0
-	fi
-	prov=$(awk -v p="$1" 'BEGIN{RS=""} /\nProvides: / && $0 ~ ("Provides:[^\n]*(^|[ ,])" p "([ ,(]|$)") { match($0, /Package: [^\n]*/); print substr($0, RSTART+9, RLENGTH-9); exit }' /var/lib/dpkg/status)
-	[ -n "$prov" ] && dpkg -L "$prov" 2>/dev/null
-}
-
-: > /tmp/probe-list
-for p in $PKGS; do
-	if pkg_files "$p" > /tmp/probe-pkg; then
-		grep -E '^/usr/(bin|sbin)/[^/]+$' /tmp/probe-pkg >> /tmp/probe-list
-	else
-		echo "PKG-MISSING $p"
-	fi
-done
-
-n=0
-for f in $(sort -u /tmp/probe-list); do
-	p=${f##*/}
+# One program per call, one line of output per program: the probes run
+# several at a time (the guest has the host's cores), and each line is
+# written whole so they do not interleave. The name goes into
+# /tmp/probe-running first and comes out after, so a program that takes the
+# console down with it is still named there.
+probe_one() {   # FILE
+	f=$1; p=${f##*/}
 	# the build removes pet2tgz, pburn's 32-bit binary, on purpose
-	case $p in pet2tgz) echo "PROBE $p SKIP rc=- removed-by-the-build"; continue ;; esac
-	[ -e "$f" ] || { echo "PROBE $p FAIL rc=- shipped-but-absent $f"; continue; }
-	[ -x "$f" ] && [ ! -d "$f" ] || continue
-	deny "$p" && { echo "PROBE $p SKIP rc=- denylist"; continue; }
-	case " $KNOWN_NO_INTERP " in *" $p "*) echo "PROBE $p SKIP rc=- interpreter-is-a-suggests"; continue ;; esac
-	n=$((n + 1))
-	# the name goes out before the program runs, so that a program that
-	# takes the console down with it is still named in the log
-	printf 'PROBE %s ' "$p"
+	case $p in pet2tgz) echo "PROBE $p SKIP rc=- removed-by-the-build"; return ;; esac
+	[ -e "$f" ] || { echo "PROBE $p FAIL rc=- shipped-but-absent $f"; return; }
+	[ -x "$f" ] && [ ! -d "$f" ] || return 0
+	deny "$p" && { echo "PROBE $p SKIP rc=- denylist"; return; }
+	case " $KNOWN_NO_INTERP " in *" $p "*) echo "PROBE $p SKIP rc=- interpreter-is-a-suggests"; return ;; esac
+	: > "/tmp/probe-running/$p"
 	out=$(timeout -k 2 10 "$f" --version </dev/null 2>&1 >/dev/null); rc=$?
 	# --help as the second try, even after 127: busybox answers --version
 	# with "applet not found" and 127, and --help with its applet list
@@ -127,9 +105,43 @@ for f in $(sort -u /tmp/probe-list); do
 	# and aborts through g_error, which GLib turns into SIGTRAP.
 	printf '%s\n' "$out" | grep -qiE 'already in use|already running|create socket' \
 		&& [ "$verdict" = FAIL ] && { verdict=OK; note="already-running"; }
-	echo "$verdict rc=$rc $note"
+	rm -f "/tmp/probe-running/$p"
+	echo "PROBE $p $verdict rc=$rc $note"
+}
+if [ "$1" = --one ]; then probe_one "$2"; exit 0; fi
+
+# A package in a squashfs module (Firefox) brings its dpkg file list but
+# only a statusnew entry, so dpkg -L does not know it; its own list file
+# says what it ships.
+# A config may also name a virtual package (gnome-mplayer, provided by the
+# repackaged gnome-mplayer-1.0.6); the provider's list is the one wanted.
+pkg_files() {   # PACKAGE
+	dpkg -L "$1" 2>/dev/null && return 0
+	if cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null | grep -q .; then
+		cat "/var/lib/dpkg/info/$1.list" "/var/lib/dpkg/info/$1:amd64.list" 2>/dev/null; return 0
+	fi
+	prov=$(awk -v p="$1" 'BEGIN{RS=""} /\nProvides: / && $0 ~ ("Provides:[^\n]*(^|[ ,])" p "([ ,(]|$)") { match($0, /Package: [^\n]*/); print substr($0, RSTART+9, RLENGTH-9); exit }' /var/lib/dpkg/status)
+	[ -n "$prov" ] && dpkg -L "$prov" 2>/dev/null
+}
+
+: > /tmp/probe-list
+for p in $PKGS; do
+	if pkg_files "$p" > /tmp/probe-pkg; then
+		grep -E '^/usr/(bin|sbin)/[^/]+$' /tmp/probe-pkg >> /tmp/probe-list
+	else
+		echo "PKG-MISSING $p"
+	fi
 done
+
+
+rm -rf /tmp/probe-running; mkdir -p /tmp/probe-running
+export DENY KNOWN_NO_INTERP BAD BAD2
+J=$(nproc 2>/dev/null || echo 2)
+sort -u /tmp/probe-list | xargs -P "$J" -n 1 "$0" --one > /tmp/probe-out 2>&1
+cat /tmp/probe-out
+n=$(grep -c '^PROBE [^ ]* \(OK\|FAIL\|RUNNING\)' /tmp/probe-out)
 echo "PROBED $n"
+[ -n "$(ls /tmp/probe-running 2>/dev/null)" ] && echo "PROBE-UNFINISHED $(ls /tmp/probe-running | tr '\n' ' ')"
 
 # Terminal programs.  Each gets a pseudo-terminal from script(1) and five
 # seconds; a program that is still running when the time is up (exit 124
