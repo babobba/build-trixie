@@ -1,57 +1,162 @@
 #!/bin/sh
-# Build each config and run every check on what it built, one config after
-# another.
+# Build each config and run every check on what it built.
 #
 #     tools/check-configs [configs-trixie/NAME.conf ...]
+#     tools/check-configs --tests-only NAME [NAME ...]
 #
 # With no arguments every config is taken. Per config: the build
-# (tools/build-unattended, zstd), the image tests, the initrd test, the
+# (tools/build-unattended, zstd), then the image tests, the initrd test, the
 # programs boot test and - when the config installs an X server - the GUI
-# boot test. Logs go under RESULTS (default /tmp/check-configs) as
-# NAME/STEP.log with the exit status in NAME/STEP.rc, the FAIL lines of
-# every step in NAME/findings.txt, and one line per config in summary.txt.
-# SKIP_GUI=1 leaves the GUI test out. A failed build skips the rest of that
-# config. Each config takes most of an hour under emulation, so this is an
-# overnight run; the summary can be read while it goes.
-cd "$(dirname "$0")/.." || exit 1
+# boot test, all against a copy of what the build produced.
+#
+# Layout under RESULTS (default /tmp/check-configs):
+#     summary.txt        one line per config, in order
+#     report.md          the same as a table, with the commit and step times
+#     NAME/STEP.log      each step's output, NAME/STEP.rc its exit status
+#     NAME/findings.txt  the FAIL lines of every step
+#     NAME/isodata/      what the build produced, kept (KEEP=0 to drop it)
+#     src/               the tree the run used (see SNAPSHOT)
+#
+# The run works from a snapshot of the committed tree (git archive HEAD),
+# not the working copy: an edit made while a build is running would
+# otherwise be read by bash half-way through the script, and the results
+# then belong to nothing in particular. The snapshot's trixie/ is the
+# repository's own (a symlink), so the apt cache in trixie/apt is shared and
+# a rebuild costs minutes, not the downloads. SNAPSHOT=0 runs from the
+# working copy instead.
+#
+# The next config builds while the current one's tests run: the tests read
+# their own copy of the isodata, and the build is mostly network and disk
+# where the tests are CPU. PIPELINE=0 runs them strictly in turn.
+#
+# --tests-only reruns the tests on the kept isodata of configs already
+# built, which is what a test-only change needs. SKIP_GUI=1 leaves the GUI
+# test out.
+REPO=$(cd "$(dirname "$0")/.." && pwd)
 RESULTS=${RESULTS:-/tmp/check-configs}
+SNAPSHOT=${SNAPSHOT:-1}; PIPELINE=${PIPELINE:-1}; KEEP=${KEEP:-1}
 mkdir -p "$RESULTS"
 SUMMARY="$RESULTS/summary.txt"
-[ $# -gt 0 ] || set -- configs-trixie/*.conf
 
-step() {   # DIR NAME COMMAND... -> ok | FAIL
+TESTS_ONLY=0
+[ "$1" = --tests-only ] && { TESTS_ONLY=1; shift; }
+if [ $# -eq 0 ]; then set -- "$REPO"/configs-trixie/*.conf; fi
+
+# ---------------------------------------------------------------- the tree
+HASH=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)
+DIRTY=""; [ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ] && DIRTY=" (working copy has uncommitted changes)"
+if [ "$SNAPSHOT" = 1 ] && git -C "$REPO" rev-parse HEAD >/dev/null 2>&1; then
+	SRC="$RESULTS/src"
+	rm -rf "$SRC"; mkdir -p "$SRC"
+	git -C "$REPO" archive HEAD | tar -x -C "$SRC"
+	mkdir -p "$REPO/trixie"; ln -s "$REPO/trixie" "$SRC/trixie"
+	echo "== running from a snapshot of $HASH$DIRTY"
+else
+	SRC="$REPO"
+	echo "== running from the working copy at $HASH$DIRTY"
+fi
+
+# ----------------------------------------------------------------- helpers
+now() { date +%s; }
+step() {   # DIR NAME COMMAND... -> ok | FAIL   (records rc, duration, findings)
 	_d=$1; _n=$2; shift 2
+	_t=$(now)
 	"$@" > "$_d/$_n.log" 2>&1; _rc=$?
-	echo $_rc > "$_d/$_n.rc"
-	grep -aE '^ *(FAIL|PROBE [^ ]+ (FAIL|TIMEOUT)|TUI [^ ]+ FAIL|GUI [^ ]+ NOWINDOW|PKG-MISSING|unexpected:| *\| GUI [^ ]+ NOWINDOW)' "$_d/$_n.log" \
+	echo $_rc > "$_d/$_n.rc"; echo "$_n $(( $(now) - _t ))" >> "$_d/times"
+	grep -aE '^ *(FAIL|PROBE [^ ]+ FAIL|TUI [^ ]+ FAIL|PKG-MISSING|unexpected:| *\| GUI [^ ]+ NOWINDOW)' "$_d/$_n.log" \
 		| sed "s/^/$_n: /" >> "$_d/findings.txt"
 	[ $_rc = 0 ] && echo ok || echo FAIL
 }
+took() { awk -v s="$2" '$1==s{print $2}' "$1/times" 2>/dev/null | head -1; }
 
-for cfg; do
-	name=$(basename "$cfg" .conf)
-	d="$RESULTS/$name"; rm -rf "$d"; mkdir -p "$d"; : > "$d/findings.txt"
-	t0=$(date +%s)
-	echo "== $name: building"
-	b=$(step "$d" build tools/build-unattended "$cfg" zstd)
-	# the build's own word is not enough: the image must be there
-	[ -s trixie/isodata/live/01-filesystem.squashfs ] && [ -s trixie/isodata/live/initrd1.xz ] || b=FAIL
+build_one() {   # NAME CONFIG -> writes NAME/build.* and NAME/isodata
+	d="$RESULTS/$1"; rm -rf "$d"; mkdir -p "$d"; : > "$d/findings.txt"; : > "$d/times"
+	echo "== $1: building"
+	b=$(cd "$SRC" && step "$d" build tools/build-unattended "$2" zstd)
+	[ -s "$SRC/trixie/isodata/live/01-filesystem.squashfs" ] && [ -s "$SRC/trixie/isodata/live/initrd1.xz" ] || b=FAIL
 	if [ "$b" != ok ]; then
 		grep -aE '^E: |FAILED' "$d/build.log" | tail -5 | sed 's/^/build: /' >> "$d/findings.txt"
-		echo "$name build=FAIL ($(( $(date +%s) - t0 ))s)" | tee -a "$SUMMARY"
-		continue
+		echo FAIL > "$d/build.result"; return 1
 	fi
-	echo "== $name: checking"
-	i=$(step "$d" image sh tests/image/run.sh)
-	r=$(step "$d" initrd sh tests/linuxrc/test_initrd_applets.sh)
-	p=$(step "$d" programs env CONFIG="$cfg" sh tests/linuxrc/boot-test-programs.sh)
-	if grep -q xserver "$cfg" && [ "${SKIP_GUI:-0}" != 1 ]; then
-		g=$(step "$d" gui env CONFIG="$cfg" sh tests/linuxrc/boot-test-gui.sh)
+	rm -rf "$d/isodata"; cp -a "$SRC/trixie/isodata" "$d/isodata"
+	echo ok > "$d/build.result"
+}
+
+test_one() {    # NAME CONFIG -> writes NAME/{image,initrd,programs,gui}.* and NAME/result
+	d="$RESULTS/$1"; iso="$d/isodata"
+	echo "== $1: checking"
+	i=$(cd "$SRC" && ISODATA="$iso" step "$d" image sh tests/image/run.sh)
+	r=$(cd "$SRC" && INITRD="$iso/live/initrd1.xz" step "$d" initrd sh tests/linuxrc/test_initrd_applets.sh)
+	p=$(cd "$SRC" && ISODATA="$iso" CONFIG="$2" NAME="programs-$1" step "$d" programs sh tests/linuxrc/boot-test-programs.sh)
+	if grep -q xserver "$2" && [ "${SKIP_GUI:-0}" != 1 ]; then
+		g=$(cd "$SRC" && ISODATA="$iso" CONFIG="$2" NAME="gui-$1" step "$d" gui sh tests/linuxrc/boot-test-gui.sh)
 	else
 		g=skipped
 	fi
-	line="$name build=ok image=$i initrd=$r programs=$p gui=$g ($(( $(date +%s) - t0 ))s)"
+	[ "$KEEP" = 1 ] || rm -rf "$iso"
+	rm -rf "/tmp/linuxrc-programs-$1" "/tmp/linuxrc-gui-$1"
+	echo "image=$i initrd=$r programs=$p gui=$g" > "$d/result"
+}
+
+record() {      # NAME -> summary line
+	d="$RESULTS/$1"
+	if [ "$(cat "$d/build.result" 2>/dev/null)" != ok ] && [ "$TESTS_ONLY" = 0 ]; then
+		line="$1 build=FAIL ($(took "$d" build)s)"
+	else
+		line="$1 build=$(cat "$d/build.result" 2>/dev/null || echo kept) $(cat "$d/result") ($(awk '{s+=$2} END{print s}' "$d/times")s)"
+	fi
 	echo "$line" | tee -a "$SUMMARY"
 	[ -s "$d/findings.txt" ] && sed 's/^/   /' "$d/findings.txt" | head -20
+}
+
+report() {
+	{
+		echo "# Config checks"
+		echo
+		echo "Commit $HASH$DIRTY, $(date '+%Y-%m-%d %H:%M'), $(hostname), accel: $( [ -w /dev/kvm ] && echo kvm || echo tcg )."
+		echo
+		echo "| Config | Build | Image | Initrd | Programs | GUI | Total |"
+		echo "|---|---|---|---|---|---|---|"
+		for n in $(cut -d' ' -f1 "$SUMMARY"); do
+			d="$RESULTS/$n"
+			t() { v=$(took "$d" "$1"); rc=$(cat "$d/$1.rc" 2>/dev/null); [ -z "$rc" ] && { echo "-"; return; }; [ "$rc" = 0 ] && s=ok || s=FAIL; echo "$s ${v}s"; }
+			echo "| $n | $(t build) | $(t image) | $(t initrd) | $(t programs) | $(t gui) | $(awk '{s+=$2} END{print s}' "$d/times")s |"
+		done
+		echo
+		for n in $(cut -d' ' -f1 "$SUMMARY"); do
+			[ -s "$RESULTS/$n/findings.txt" ] || continue
+			echo "## $n"; echo; sed 's/^/    /' "$RESULTS/$n/findings.txt" | head -30; echo
+		done
+	} > "$RESULTS/report.md"
+}
+
+# -------------------------------------------------------------------- run
+prev=""; prevcfg=""; TPID=""
+for cfg; do
+	if [ "$TESTS_ONLY" = 1 ]; then
+		name=$(basename "$cfg" .conf); cfg="$SRC/configs-trixie/$name.conf"
+		d="$RESULTS/$name"
+		[ -d "$d/isodata" ] || { echo "$name: no kept isodata under $d" | tee -a "$SUMMARY"; continue; }
+		rm -f "$d"/image.* "$d"/initrd.* "$d"/programs.* "$d"/gui.* "$d/result"; : > "$d/findings.txt"
+		grep -v '^build ' "$d/times" > "$d/times.new" 2>/dev/null; mv "$d/times.new" "$d/times"
+		test_one "$name" "$cfg"; record "$name"; continue
+	fi
+	name=$(basename "$cfg" .conf)
+	case $cfg in /*) ;; *) cfg="$SRC/$cfg" ;; esac
+	[ -f "$cfg" ] || cfg="$SRC/configs-trixie/$name.conf"
+	if ! build_one "$name" "$cfg"; then
+		[ -n "$TPID" ] && { wait $TPID; record "$prev"; TPID=""; }
+		record "$name"; continue
+	fi
+	# the previous config's tests must be over before this one's start:
+	# one guest at a time, and the summary keeps the build order
+	[ -n "$TPID" ] && { wait $TPID; record "$prev"; TPID=""; }
+	if [ "$PIPELINE" = 1 ]; then
+		test_one "$name" "$cfg" & TPID=$!; prev=$name
+	else
+		test_one "$name" "$cfg"; record "$name"
+	fi
 done
-echo "== done: $SUMMARY"
+[ -n "$TPID" ] && { wait $TPID; record "$prev"; }
+report
+echo "== done: $SUMMARY, $RESULTS/report.md"

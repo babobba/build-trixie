@@ -405,6 +405,13 @@ mkdir -p isodata/live/rootcopy  # create it, as github doesn't support empty dir
 #tar -zxf ../dog-boot-trixie-20240602.tar.gz
 echo -e "\e[0;36mCopy scripts, required for porteus-boot, to the chroot...\033[0m"
 cp -af ../dog-boot-trixie-20240602/* chroot/
+# The overlay brings Google's Chrome repository along. Only a config that
+# installs Chrome has a use for it; every other image would poll Google on
+# each apt update and every build would spend its retries on it.
+case " $BASE_INSTALL $BASE_APPS_INSTALL $DESK_APPS_INSTALL $BASE_DOG_APPS_INSTALL $EXTRA_DOG_APPS_INSTALL " in
+   *google-chrome*) ;;
+   *) rm -f chroot/etc/apt/sources.list.d/google-chrome.list ;;
+esac
 ok_or_failed
 
 echo -e "\e[0;36mExtract initrd skeleton, required for porteus-boot, to chroot/tmp ...\033[0m"
