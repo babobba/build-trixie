@@ -1,17 +1,32 @@
 # Every config through every check
 
-Result of `tools/check-configs` over the sysvinit configs, 5 September 2026,
-built from the trixie-sysvinit branch at 51b3ab6. Each config was built,
-then put through the image tests, the initrd test, the programs boot test
-and the GUI boot test. What the first runs found and what was fixed is in
-the commit history of that day; this is the state after the fixes.
+Result of `tools/check-configs` over the sysvinit configs, 6 September 2026,
+built from a snapshot of the trixie-sysvinit branch at 6e44387 under
+emulation (no KVM on the build host). Each config was built, then put
+through the image tests, the initrd test, the programs boot test and the
+GUI boot test. What the first runs found and what was fixed is in the
+commit history of the two days before; this is the state after the fixes.
+
+Times are per step in seconds; with the next config building while the
+current one's tests run, the six larger configs took 103 minutes of wall
+clock, where the same six had taken 187 the day before one after the
+other. On a host with KVM the guest steps are several times shorter again.
+
+| Config | Build | Image | Initrd | Programs | GUI | Total |
+|---|---|---|---|---|---|---|
+| default-pxe | ok 308 | ok 49 | ok 2 | ok 237 | ok 318 | 914 |
+| jwm | ok 288 | ok 50 | ok 2 | ok 173 | ok 293 | 806 |
+| default | ok 214 | ok 40 | ok 2 | ok 201 | ok 313 | 770 |
+| mate | ok 310 | ok 54 | ok 2 | ok 210 | ok 273 | 849 |
+| lxqt | ok 325 | FAIL 58 | ok 2 | ok 220 | ok 366 | 971 |
+| obdog | ok 344 | FAIL 80 | ok 2 | ok 431 | FAIL 942 | 1799 |
+| tint2 | ok 418 | FAIL 80 | ok 2 | ok 427 | FAIL 963 | 1890 |
+| ddog | ok 417 | FAIL 77 | ok 2 | ok 342 | FAIL 921 | 1759 |
+
 
 | Config | Result | What remains |
 |---|---|---|
-| default | green | |
-| default-pxe | green | |
-| jwm | green | |
-| mate | green | |
+| default, default-pxe, jwm, mate | green | |
 | lxqt | one script call | apt-trim calls `rm_func`, which nothing defines |
 | obdog | six script calls, xlunch | see below |
 | tint2 | seven script calls, xlunch | see below, plus ob-desktop runs cairo-dock, not installed |
