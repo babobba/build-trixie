@@ -447,6 +447,15 @@ echo -en "`cat /etc/resolv.conf`" > chroot/etc/resolv.conf
 ############ Start running in chroot ############
 #################################################
 chroot_in () { 
+# The build host may point curl at a CA bundle of its own through the
+# environment (a proxying sandbox does, SSL_CERT_FILE and CURL_CA_BUNDLE);
+# chroot carries those variables in, the path does not exist here, and every
+# https fetch by curl fails before it starts. That is how the xlibre signing
+# key went missing while apt, which reads /etc/ssl/certs, fetched everything.
+for v in SSL_CERT_FILE CURL_CA_BUNDLE SSL_CERT_DIR REQUESTS_CA_BUNDLE GIT_SSL_CAINFO; do
+   eval _p=\${$v:-}
+   [ -n "$_p" ] && [ ! -e "$_p" ] && unset $v
+done
 if [ -z $(which apt-get) ]; then
 echo -e "\e[0;31mSorry, apt-get not found, cannot continue\033[0m"
 echo -e "\e[0;36mExiting . . .\033[0m"
