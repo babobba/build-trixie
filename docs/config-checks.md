@@ -31,7 +31,7 @@ other. On a host with KVM the guest steps are several times shorter again.
 | obdog | six script calls, xlunch | see below |
 | tint2 | seven script calls, xlunch | see below, plus ob-desktop runs cairo-dock, not installed |
 | ddog | five script calls, xlunch | see below |
-| lxqt-full, chromedog | not built here | they install Google Chrome, and dl.google.com is unreachable from the build sandbox; nothing else is known to be wrong with them |
+| lxqt-full, chromedog | not built here | they install Google Chrome, and the build sandbox's egress proxy denies dl.google.com (CONNECT answered 403, checked again on 7 September over ten minutes); nothing else is known to be wrong with them. What the last attempt did show: the overlay's Chrome entry was plain http, which apt in the chroot fetched directly and lost at DNS while every Debian archive went through the HTTPS proxy; the entry is https now, so the next attempt reaches Google the way it reaches Debian |
 | *-xlibre (ten) | cannot build | the `xserver-xlibre-*` and `xlibre` packages are in no repository the build knows |
 
 Findings that remain on obdog, tint2 and ddog, all in scripts from the
