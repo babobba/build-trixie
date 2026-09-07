@@ -69,8 +69,22 @@ step() {   # DIR NAME COMMAND... -> ok | FAIL   (records rc, duration, findings)
 }
 took() { awk -v s="$2" '$1==s{print $2}' "$1/times" 2>/dev/null | head -1; }
 
+# A build needs about 3 GB of room and each kept isodata holds 400 MB, so a
+# long run fills the disk with its own results: dpkg then fails mid-install,
+# the initrd repack fails, and the kernel step of one build found no kernel.
+# Before each build, kept isodata is dropped oldest first until MIN_FREE_GB
+# (default 4) is free; the logs and findings stay.
+make_room() {
+	while [ "$(df -BG --output=avail "$RESULTS" | tail -1 | tr -dc 0-9)" -lt "${MIN_FREE_GB:-4}" ]; do
+		old=$(ls -td "$RESULTS"/*/isodata 2>/dev/null | tail -1)
+		[ -n "$old" ] || { echo "   less than ${MIN_FREE_GB:-4} GB free and nothing left to drop" >&2; return 1; }
+		echo "   dropping $old to make room"; rm -rf "$old"
+	done
+}
+
 build_one() {   # NAME CONFIG -> writes NAME/build.* and NAME/isodata
 	d="$RESULTS/$1"; rm -rf "$d"; mkdir -p "$d"; : > "$d/findings.txt"; : > "$d/times"
+	make_room
 	echo "== $1: building"
 	b=$(cd "$SRC" && step "$d" build tools/build-unattended "$2" zstd)
 	[ -s "$SRC/trixie/isodata/live/01-filesystem.squashfs" ] && [ -s "$SRC/trixie/isodata/live/initrd1.xz" ] || b=FAIL
