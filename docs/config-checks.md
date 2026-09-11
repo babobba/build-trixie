@@ -1,6 +1,6 @@
 # Every config through every check
 
-Result of `tools/check-configs` over the sysvinit configs, 6 September 2026,
+Result of `tools/check-configs` over the sysvinit configs, 6 and 11 September 2026,
 built from a snapshot of the trixie-sysvinit branch at 6e44387 under
 emulation (no KVM on the build host). Each config was built, then put
 through the image tests, the initrd test, the programs boot test and the
@@ -14,6 +14,14 @@ other. On a host with KVM the guest steps are several times shorter again.
 
 | Config | Build | Image | Initrd | Programs | GUI | Total |
 |---|---|---|---|---|---|---|
+| default-xlibre | ok 288 | ok 53 | ok 2 | ok 189 | ok 323 | 855 |
+| jwm-xlibre | ok 237 | ok 56 | ok 2 | ok 207 | ok 311 | 813 |
+| mate-xlibre | ok 380 | ok 58 | ok 2 | ok 212 | ok 259 | 911 |
+| xfce4-xlibre | ok 298 | ok 51 | ok 1 | ok 223 | ok 265 | 838 |
+| lxqt-xlibre | ok 329 | FAIL 58 | ok 1 | ok 218 | ok 365 | 971 |
+| obdog-xlibre | ok 347 | FAIL 80 | ok 1 | ok 435 | FAIL 895 | 1758 |
+| tint2-xlibre | ok 421 | FAIL 83 | ok 1 | ok 424 | FAIL 900 | 1829 |
+| ddog-xlibre | ok 410 | FAIL 79 | ok 1 | ok 347 | FAIL 917 | 1754 |
 | default-pxe | ok 308 | ok 49 | ok 2 | ok 237 | ok 318 | 914 |
 | jwm | ok 288 | ok 50 | ok 2 | ok 173 | ok 293 | 806 |
 | default | ok 214 | ok 40 | ok 2 | ok 201 | ok 313 | 770 |
@@ -32,7 +40,9 @@ other. On a host with KVM the guest steps are several times shorter again.
 | tint2 | seven script calls, xlunch | see below, plus ob-desktop runs cairo-dock, not installed |
 | ddog | five script calls, xlunch | see below |
 | lxqt-full, chromedog | not built here | they install Google Chrome, and the build sandbox's egress proxy denies dl.google.com (CONNECT answered 403, checked again on 7 September over ten minutes); nothing else is known to be wrong with them. What the last attempt did show: the overlay's Chrome entry was plain http, which apt in the chroot fetched directly and lost at DNS while every Debian archive went through the HTTPS proxy; the entry is https now, so the next attempt reaches Google the way it reaches Debian |
-| *-xlibre (ten) | cannot build | the `xserver-xlibre-*` and `xlibre` packages are in no repository the build knows |
+| default-xlibre, jwm-xlibre, mate-xlibre, xfce4-xlibre | green | the XLibre server runs every program's window as Xorg does |
+| lxqt-xlibre, obdog-xlibre, tint2-xlibre, ddog-xlibre | as their Xorg counterparts | the same script findings and xlunch, nothing XLibre-specific; mtpaint once died of a segmentation fault at start on tint2-xlibre and opened its window on the rerun |
+| lxqt-full-xlibre, chromedog-xlibre | not built here | Chrome, as above |
 
 Findings that remain on obdog, tint2 and ddog, all in scripts from the
 DebianDog packages rather than in this build:
@@ -54,6 +64,15 @@ libimobiledevice-utils and ifuse), a script to fix upstream, or a thing to
 accept and list as optional in `tests/image/test_executables.sh`. That is
 a decision for the maintainer; until it is made these configs stay red on
 exactly these lines.
+
+The xlibre configs were reported earlier as unbuildable anywhere. That was
+wrong: build-trixie adds the repository at xlibre-deb.github.io inside the
+chroot and its trixie suite carries every package the configs name. The
+key fetch had failed because the build host's environment pointed curl at
+a CA bundle that does not exist inside the chroot (SSL_CERT_FILE and
+CURL_CA_BUNDLE, which chroot carries in); apt reads /etc/ssl/certs and was
+never affected. chroot_in now drops such variables when their path is
+absent, and the eight xlibre configs without Chrome build.
 
 Two more things the batch showed that are not defects of any one config:
 the dog-boot overlay puts Google's Chrome repository into every image's
